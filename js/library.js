@@ -34,7 +34,7 @@ export async function load() {
   lib.favFolders = favs || [];
 }
 
-const DEFAULTS = { layout: 'cover', portraitSingle: false, rtl: false, trim: false, tone: 'normal', page: 1, marks: [], fav: false, coverPage: 1, coverPart: 'whole' };
+const DEFAULTS = { layout: 'cover', portraitSingle: false, rtl: false, trim: false, tone: 'normal', page: 1, marks: [], fav: false, coverPage: 1, coverPart: 'whole', checked: false };
 export const stateOf = path => ({ ...DEFAULTS, marks: [], ...lib.states.get(path), path });
 export function saveState(state) {
   lib.states.set(state.path, state);

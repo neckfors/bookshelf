@@ -58,15 +58,95 @@ async function load(path, stats) {
   return { pdf, source: { path, size: file.size, mtime: file.lastModified } };
 }
 
+// A page wider than it is tall: a spread scanned as one page, or a book in landscape format.
+async function isWide(pdf, number) {
+  const { width, height } = (await pdf.getPage(number)).getViewport({ scale: 1 });
+  return width > height * 1.1;
+}
+
+// Done once per book, when first opened: a book of mostly wide pages is shown a page at a time. The
+// front page is often shaped differently, so the pages after it decide. A layout already chosen stays.
+async function checkLayout(pdf, state) {
+  if (state.checked) return false;
+  if (state.layout === 'cover') {
+    const numbers = pdf.numPages > 1 ? [2, 3, 4, 5].filter(n => n <= pdf.numPages) : [1];
+    const wide = await Promise.all(numbers.map(n => isWide(pdf, n)));
+    if (wide.filter(Boolean).length > numbers.length / 2) state.layout = 'single';
+  }
+  state.checked = true;
+  return true;
+}
+
+// Some PDFs say they are read from right to left. This isn't waited for: in the Android app it needs
+// pdf.js to load the book too.
+async function checkDirection(current) {
+  const preferences = await current.pdf.getViewerPreferences();
+  if (book !== current || current.state.rtl || preferences?.Direction !== 'R2L') return;
+  current.state.rtl = true;
+  data.saveState(current.state);
+  redraw();
+}
+
+// With two pages at a time, a wide page is shown alone. Which pages are wide is saved with the book,
+// along with how far it has been looked through.
+function wideInfo() {
+  const { state, source } = book, file = `${source.size}:${source.mtime}`;
+  if (state.wide?.file !== file) state.wide = { file, upTo: 0, pages: [] };
+  return state.wide;
+}
+
+async function look(current, info, number) {
+  if (number <= info.upTo || info.pages.includes(number) || !await isWide(current.pdf, number)) return false;
+  if (!info.pages.includes(number)) info.pages.push(number);
+  return true;
+}
+
+// Looks at the pages near the one being opened, so they are grouped right from the start.
+async function lookNearby() {
+  if (book.state.layout === 'single') return;
+  const current = book, info = wideInfo();
+  const from = Math.max(1, book.page - 2), to = Math.min(book.count, book.page + 3);
+  await Promise.all(Array.from({ length: to - from + 1 }, (_, i) => look(current, info, from + i)));
+}
+
+// Looks through the rest of the book in the background, one page at a time.
+async function lookThrough() {
+  const current = book;
+  if (!current?.spreads.length || current.looking || current.state.layout === 'single') return;
+  current.looking = true;
+  const info = wideInfo();
+  try {
+    while (book === current && info.upTo < current.count) {
+      const number = info.upTo + 1;
+      const found = await look(current, info, number);
+      info.upTo = Math.max(info.upTo, number);
+      if (found && book === current) regroup();
+    }
+    data.saveState(current.state);
+  } finally {
+    current.looking = false;
+  }
+}
+
+// Groups the pages again. What is on screen is only drawn again if it or a page beside it changed.
+function regroup() {
+  const near = () => [-1, 0, 1].map(i => book.spreads[book.index + i]?.join()).join('|');
+  const before = near();
+  buildSpreads();
+  if (near() === before || turning) updateBars();
+  else show();
+}
+
 function buildSpreads() {
   const { state, count } = book;
   const single = state.layout === 'single' || (state.portraitSingle && portrait.matches);
+  const wide = new Set(state.wide?.pages);
   const spreads = [];
   let n = 1;
   if (!single && state.layout === 'cover') spreads.push([n++]);
   while (n <= count) {
     const spread = [n++];
-    if (!single && n <= count) spread.push(n++);
+    if (!single && n <= count && !wide.has(spread[0]) && !wide.has(n)) spread.push(n++);
     spreads.push(spread);
   }
   book.spreads = spreads;
@@ -104,9 +184,15 @@ export async function openBook(path) {
     // The file may have been replaced by a shorter one.
     if (book.page > book.count) book.page = book.count;
     state.marks = state.marks.filter(m => m <= book.count);
+    const first = await checkLayout(pdf, state);
+    if (book !== opening) return true;
+    await lookNearby();
+    if (book !== opening) return true;
     buildSpreads();
     await show();
     if (book === opening) {
+      if (first) checkDirection(opening).catch(console.warn);
+      lookThrough().catch(console.warn);
       $('loading').hidden = true;
       data.saveTiming('open', { ms: performance.now() - began, fileMs, picture: await preview, bytes: stats.bytes, readMs: stats.readMs });
     }
@@ -204,12 +290,12 @@ async function drawSpread(index, quality) {
 }
 
 function cached(index) {
-  const { cache } = book;
-  let entry = cache.get(index);
+  const { cache } = book, key = book.spreads[index].join();
+  let entry = cache.get(key);
   if (!entry) {
     entry = drawSpread(index, 1);
-    entry.catch(() => cache.delete(index));
-    cache.set(index, entry);
+    entry.catch(() => cache.delete(key));
+    cache.set(key, entry);
   }
   return entry;
 }
@@ -220,7 +306,8 @@ async function show() {
   const { index, spreads } = current;
   current.zoom = 1; current.x = current.y = 0;
   updateBars();
-  for (const key of current.cache.keys()) if (Math.abs(key - index) > 2) current.cache.delete(key);
+  const nearby = new Set(spreads.slice(Math.max(0, index - 2), index + 3).map(s => s.join()));
+  for (const key of current.cache.keys()) if (!nearby.has(key)) current.cache.delete(key);
   const order = current.state.rtl ? [index + 1, index, index - 1] : [index - 1, index, index + 1];
   const fill = async i => {
     const target = order[i];
@@ -250,19 +337,18 @@ async function turn(step) {
   if (next >= book.spreads.length) return requestClose(); // past the last page: close the book
   if (next < 0) return slide(0, true);
   turning = true;
-  const current = book;
+  const current = book, target = book.spreads[next];
   try {
     resetZoom();
-    await cached(next);
+    const canvas = await cached(next);
     if (book !== current) return;
     const side = (current.state.rtl ? -step : step) > 0 ? 2 : 0;
-    const canvas = await cached(next);
     if (slots[side].firstChild !== canvas) slots[side].replaceChildren(canvas);
     slide(side === 2 ? -stage.clientWidth : stage.clientWidth, true);
     await new Promise(resolve => setTimeout(resolve, 210));
     if (book !== current) return;
-    current.index = next;
-    current.page = current.spreads[next][0];
+    current.page = target[0];
+    current.index = current.spreads.findIndex(s => s.includes(current.page));
     // Move the new page into the middle before the strip jumps back.
     slots[1].replaceChildren(canvas);
     slide(0, false);
@@ -291,6 +377,7 @@ function redraw() {
   slide(0, false);
   slots.forEach(s => s.replaceChildren());
   show();
+  lookThrough().catch(console.warn);
 }
 let resizeTimer;
 new ResizeObserver(() => {

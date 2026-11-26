@@ -47,7 +47,12 @@ to install from the browser.
 ## Reading
 - Fullscreen, portrait and landscape. Swipe or tap the sides to turn; tap the middle for the menu.
 - Pinch to zoom. While zoomed, drag to move around.
-- Settings saved per book: single page, two pages, or two pages with the cover alone (default);
+- The first time a book is opened, the app looks at the shape of pages 2–5. If most are wider than
+  tall (spreads scanned as one page, or a landscape book), it starts as single page, otherwise as two
+  pages with the cover alone. A PDF that says it reads from right to left is set that way. What you
+  choose afterwards stays.
+- With two pages at a time, a wide page (such as a double spread in a comic) is shown alone.
+- Settings saved per book: single page, two pages, or two pages with the cover alone;
   single page in portrait; right to left; trim white margins; normal, sepia or dark pages;
   which page (and which half) is the cover.
 - Bookmarks, table of contents, page slider and "Go to page".

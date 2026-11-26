@@ -38,6 +38,7 @@ export async function openNative(file, options) {
         })() }),
       };
     },
+    getViewerPreferences: async () => (await full()).getViewerPreferences(),
     getOutline: async () => (await full()).getOutline(),
     getDestination: async name => (await full()).getDestination(name),
     getPageIndex: async ref => (await full()).getPageIndex(ref),
