@@ -14,7 +14,7 @@ It comes in two forms with the same screens and features:
 - Folders with book counts, favorite folders and favorite books. Only folders that hold books themselves
   are listed, with the folders above them shown beside the count.
 - Search in file and folder names (accents don't matter), everywhere or in the open folder.
-- 2 to 10 columns, set separately for portrait and landscape.
+- 2 to 10 columns, set separately for portrait and landscape (a phone starts with fewer than a tablet).
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed
   automatically (by size and date). You can also refresh all covers.
 - Covers are drawn with PDFium (the engine in Chrome's own PDF viewer), which goes straight to the
@@ -97,3 +97,7 @@ The APK ends up in `android/app/build/outputs/apk/release/`. It is signed with t
 debug key, and an update only installs over an app signed with the same key.
 
 **Release:** raise `VERSION` in `sw.js`, commit and push, then run `.\release.ps1`.
+
+## Support
+
+If you like the app, you can support the author on [PayPal](https://paypal.me/neckfors). Thank you!

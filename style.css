@@ -79,4 +79,5 @@ input[type=range]{width:100%;accent-color:var(--gold)}
 .step{display:flex;align-items:center;gap:12px}
 .item{display:flex;width:100%;justify-content:space-between;gap:12px;text-align:left;padding:12px 2px;border-bottom:1px solid var(--line)}
 .wide{width:100%;border:1px solid #ffffff22;border-radius:14px;padding:13px;margin-top:10px}
+.support{display:block;margin-top:16px;padding:10px;text-align:center;color:var(--gold);text-decoration:none}
 .num{width:100%;background:#0005;border:1px solid var(--gold);border-radius:12px;padding:12px;margin:10px 0}

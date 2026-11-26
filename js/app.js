@@ -11,7 +11,8 @@ const { lib } = data;
 const urls = new Map(); // path -> { blob, url }
 let view = { type: 'folder', path: '' };
 let query = '', onlyHere = false, hasAccess = false;
-let columns = { portrait: 5, landscape: 7 };
+// A phone starts with fewer columns than a tablet.
+let columns = Math.min(screen.width, screen.height) < 600 ? { portrait: 3, landscape: 6 } : { portrait: 5, landscape: 7 };
 const portrait = matchMedia('(orientation: portrait)');
 
 function coverUrl(book) {
@@ -236,7 +237,8 @@ $('menuBtn').onclick = async () => {
     <button class="wide" data-act="pick">${lib.root ? 'Change book folder' : 'Choose book folder'}</button>
     ${timingsHtml()}
     <p class="dim" id="version" style="margin-top:16px"></p>
-    ${app ? '<button class="wide" data-act="update">Check for updates</button>' : ''}`);
+    ${app ? '<button class="wide" data-act="update">Check for updates</button>' : ''}
+    <a class="support" href="https://paypal.me/neckfors" target="_blank" rel="noopener">&#9829; Support the author</a>`);
   sheet.onclick = async e => {
     const el = e.target.closest('button');
     if (!el) return;
