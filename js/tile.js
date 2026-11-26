@@ -1,4 +1,4 @@
-// Builds one finished tile image per book (blurred background + whole cover), so browsing never opens a PDF.
+// Builds one finished tile image per book (the whole cover in its own shape), so browsing never opens a PDF.
 import { makeCanvas, inkBox, crop } from './pdf.js';
 import { bookName } from './util.js';
 
@@ -18,30 +18,12 @@ export async function finishTile(art, path, coverPart) {
 
 const toBlob = canvas => canvas.convertToBlob({ type: 'image/jpeg', quality: .86 });
 
+// The cover and nothing else, as large as fits in the tile.
 function tile(art) {
-  const out = makeCanvas(W, H), ctx = out.getContext('2d');
-  // Blur by shrinking to a few pixels and scaling up again (works in every browser).
-  const tiny = makeCanvas(16, 24);
-  const cover = Math.max(16 / art.width, 24 / art.height);
-  tiny.getContext('2d').drawImage(art, (16 - art.width * cover) / 2, (24 - art.height * cover) / 2, art.width * cover, art.height * cover);
-  const mid = makeCanvas(64, 96);
-  mid.getContext('2d').drawImage(tiny, 0, 0, 64, 96);
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(mid, -20, -30, W + 40, H + 60);
-  ctx.fillStyle = 'rgba(0,0,0,.45)';
-  ctx.fillRect(0, 0, W, H);
   const fit = Math.min(W / art.width, H / art.height);
-  const w = art.width * fit, h = art.height * fit, x = (W - w) / 2, y = (H - h) / 2;
-  ctx.shadowColor = 'rgba(0,0,0,.7)';
-  ctx.shadowBlur = 18;
-  ctx.drawImage(art, x, y, w, h);
-  ctx.shadowColor = 'transparent';
-  const spine = ctx.createLinearGradient(x, 0, x + w * .09, 0);
-  spine.addColorStop(0, 'rgba(0,0,0,.35)');
-  spine.addColorStop(.45, 'rgba(255,255,255,.12)');
-  spine.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = spine;
-  ctx.fillRect(x, y, w * .09, h);
+  const out = makeCanvas(art.width * fit, art.height * fit), ctx = out.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(art, 0, 0, out.width, out.height);
   return toBlob(out);
 }
 

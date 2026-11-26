@@ -2,6 +2,7 @@
 import * as data from './library.js';
 import * as db from './db.js';
 import { openPdf, makeCanvas, renderPage, inkBox, crop } from './pdf.js';
+import { openNative } from './native.js';
 import { attachGestures } from './gestures.js';
 import { $, ICON, esc, bookName, openSheet, closeSheet } from './util.js';
 
@@ -52,7 +53,7 @@ async function showPreview(opening) {
 async function load(path, stats) {
   const file = await data.fileFor(path);
   const same = kept && kept.path === path && kept.size === file.size && kept.mtime === file.lastModified;
-  const pdf = same ? kept.pdf : await openPdf(file, { stats });
+  const pdf = same ? kept.pdf : await (file.native ? openNative : openPdf)(file, { stats });
   if (same) kept = null;
   return { pdf, source: { path, size: file.size, mtime: file.lastModified } };
 }

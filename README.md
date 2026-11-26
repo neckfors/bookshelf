@@ -9,8 +9,9 @@ It comes in two forms with the same screens and features:
 - **Web app** to install from the browser: https://neckfors.github.io/bookshelf/
 
 ## Browsing
-- Front covers only, in equal tiles. The whole cover is shown, with a blurred frame filling the gaps.
-  White scan borders are trimmed. A book with a blank, locked or broken first page gets a title cover.
+- Front covers only, with nothing around them. Each takes an equally sized space and is shown whole, in
+  its own shape. White scan borders are trimmed. A book with a blank, locked or broken first page gets
+  a title cover.
 - Folders with book counts, favorite folders and favorite books. A folder holds only the books directly
   in it. Every folder with books of its own is listed on the home screen, however deep it is, with the
   folders it lies in shown beside the count; folders without books of their own are not listed.
@@ -73,15 +74,16 @@ To run it locally: `py -3 -m http.server 8123`, then open `http://localhost:8123
 
 ## Android app
 For Android 8 or newer. It shows the same pages as the web app, from inside the APK, so the two stay alike.
-Android gets at the book folder and draws the front pages itself.
+Android gets at the book folder and draws the pages itself, both the front pages and the pages you read,
+so books open quickly.
 
 **Install:** download the APK from the [newest release](https://github.com/neckfors/bookshelf/releases/latest),
 open it, and allow your browser or file manager to install apps when asked. Then tap **Choose folder**.
 Android doesn't allow choosing the Download folder itself, only folders inside it.
 
 - Favorites, layouts, bookmarks and reading positions from the web app are not carried over.
-- The first book you open needs a network connection to fetch pdf.js from jsDelivr; it is then kept,
-  and the app works offline.
+- The table of contents is read with pdf.js, fetched from jsDelivr the first time it is needed (this
+  needs a network connection) and then kept. Everything else works offline from the start.
 - Reading is full screen and keeps the screen on. **Back** closes an open sheet or book.
 - **Updates:** the app compares itself with `version.json` here on GitHub when you return to it and every
   30 minutes, or when you tap **Check for updates** in Settings. When there is a new version, a bar appears above the library (not over an open book), and its **Update** button opens the download page. Install the

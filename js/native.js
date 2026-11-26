@@ -1,11 +1,48 @@
 // The Android app shows these same pages, with the book folder, the front pages and the screen handled
 // by Android. In a browser this file does nothing.
+import { openPdf } from './pdf.js';
+
 export const app = window.AndroidBridge;
 
 async function ask(what, params) {
   const response = await fetch(`/native/${what}?${new URLSearchParams(params)}`, { cache: 'no-store' });
   if (!response.ok) throw new Error(`${what}: ${response.status}`);
   return response;
+}
+
+// A book for the reader, made to look like a pdf.js document. Android draws the pages, which is much
+// faster than loading the file into pdf.js. pdf.js is only used for the table of contents, and when
+// Android can't open a file (it then also tells why).
+export async function openNative(file, options) {
+  let first;
+  try { first = await file.pageInfo(1); }
+  catch (e) {
+    console.warn(e);
+    return openPdf(file, options);
+  }
+  const sizes = new Map([[1, first]]);
+  let other = null;
+  const full = () => other ??= openPdf(file).catch(e => { other = null; throw e; });
+  return {
+    numPages: first.count,
+    async getPage(number) {
+      let size = sizes.get(number);
+      if (!size) sizes.set(number, size = await file.pageInfo(number));
+      return {
+        getViewport: ({ scale }) => ({ width: size.width * scale, height: size.height * scale }),
+        render: ({ canvasContext }) => ({ promise: (async () => {
+          const { width, height } = canvasContext.canvas;
+          const picture = await createImageBitmap(await file.viewPage(number, width, height));
+          canvasContext.drawImage(picture, 0, 0, width, height);
+          picture.close();
+        })() }),
+      };
+    },
+    getOutline: async () => (await full()).getOutline(),
+    getDestination: async name => (await full()).getDestination(name),
+    getPageIndex: async ref => (await full()).getPageIndex(ref),
+    destroy: () => { other?.then(pdf => pdf.destroy(), () => {}); },
+  };
 }
 
 // The chosen folder, made to look like the browser's folder access, so the rest of the app needs no changes.
@@ -43,6 +80,10 @@ export function nativeRoot(tree) {
       slice: (start, end) => ({
         arrayBuffer: async () => (await ask('read', { tree, path: book.path, start, end: Math.min(end, book.size) })).arrayBuffer(),
       }),
+      // For the reader: how many pages there are and a page's size, and that page as a picture.
+      pageInfo: async page => (await ask('size', { tree, path: book.path, page })).json(),
+      viewPage: async (page, width, height) =>
+        (await ask('view', { tree, path: book.path, page, w: width, h: height })).blob(),
       // A page as a picture that fits in the box; empty if the PDF can't be shown.
       frontPage: async (page, { maxWidth, maxHeight }) =>
         (await ask('page', { tree, path: book.path, page, w: Math.round(maxWidth), h: Math.round(maxHeight) })).blob(),

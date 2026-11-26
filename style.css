@@ -38,10 +38,10 @@ h2 small{font:13px system-ui,sans-serif;color:var(--dim)}
 .chip{border:1px solid #ffffff22;border-radius:18px;padding:8px 14px;font-size:13px}
 .chip.on{background:var(--text);color:#17120a}
 .grid{display:grid;grid-template-columns:repeat(var(--cols,5),minmax(0,1fr));gap:clamp(8px,1.6vw,18px)}
-.tile{aspect-ratio:2/3;position:relative;overflow:hidden;border-radius:8px;box-shadow:0 8px 16px #000b;background:var(--panel);display:block;width:100%;content-visibility:auto}
-.tile img{width:100%;height:100%;display:block;object-fit:cover}
-.tile .wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim)}
-.tile .badge{position:absolute;right:5px;top:5px;color:var(--gold);filter:drop-shadow(0 1px 3px #000)}
+.tile{aspect-ratio:2/3;position:relative;overflow:hidden;display:block;width:100%;padding:0;content-visibility:auto}
+.tile img{width:100%;height:100%;display:block;object-fit:contain;object-position:bottom}
+.tile .wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);background:var(--panel)}
+.tile .badge{position:absolute;right:5px;bottom:5px;color:var(--gold);filter:drop-shadow(0 1px 3px #000)}
 .tile .badge svg{fill:currentColor}
 .empty{text-align:center;color:var(--dim);padding:60px 20px;line-height:1.6}
 .empty .pill{margin-top:18px}

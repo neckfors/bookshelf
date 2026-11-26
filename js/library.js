@@ -19,11 +19,15 @@ export const lib = {
   onStatus: () => {},
 };
 
+// Raised when covers are made to look different, so saved ones are made again.
+const LOOK = 2;
+
 export async function load() {
   const [books, states, root, favs, timings] = await Promise.all(
     [db.getAll('books'), db.getAll('state'), db.kvGet('root'), db.kvGet('favFolders'), db.kvGet('timings')]);
   lib.timings = timings || {};
-  books.forEach(b => lib.books.set(b.path, b));
+  // A cover saved with an earlier look is shown until its new one is ready.
+  books.forEach(b => lib.books.set(b.path, b.cover && b.look !== LOOK ? { ...b, stale: true } : b));
   states.forEach(s => lib.states.set(s.path, s));
   lib.root = root?.native ? nativeRoot(root.native) : root || null;
   if (lib.root) warmUp();
@@ -327,7 +331,7 @@ export async function refreshCover(path, tools = {}) {
   if (tools.stats) tools.stats.fileMs += performance.now() - began;
   const cover = await makeCover(file, path, stateOf(path), tools);
   if (lib.books.get(path) !== book) return;
-  Object.assign(book, { cover, stale: false, size: file.size, mtime: file.lastModified });
+  Object.assign(book, { cover, look: LOOK, stale: false, size: file.size, mtime: file.lastModified });
   // Shown first: saving does not need to be waited for to see it.
   (tools.show || lib.onCover)(path);
   const drawn = performance.now();

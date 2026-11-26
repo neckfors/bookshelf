@@ -138,7 +138,7 @@ function timingsHtml() {
     const each = key => seconds((covers[key] || 0) / covers.count);
     lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)} (${(covers.count / covers.ms * 1000).toFixed(1)} a second, ${covers.lanes || 3} at a time). Per book ${each('jobMs')}: finding the file ${each('fileMs')}, first read ${each('firstMs')}, waiting to draw ${each('waitMs')}, more reading ${each('readMs')}, picture ${each('drawMs')}, tile ${each('tileMs')}, saving ${each('saveMs')}. ${megabytes(covers.bytes / covers.count)} in ${((covers.reads || 0) / covers.count).toFixed(1)} reads per book, ${covers.direct || 0} scanned pictures taken directly`);
   }
-  if (open) lines.push(`Last book opened in ${seconds(open.ms)}${open.picture ? ' (picture shown at once)' : ''}: file ${seconds(open.fileMs ?? 0)}, drawing ${seconds(open.ms - (open.fileMs ?? 0))}, of which reading ${seconds(open.readMs)}, ${megabytes(open.bytes)} read`);
+  if (open) lines.push(`Last book opened in ${seconds(open.ms)}${open.picture ? ' (picture shown at once)' : ''}: file ${seconds(open.fileMs ?? 0)}, drawing ${seconds(open.ms - (open.fileMs ?? 0))}${open.bytes ? `, of which reading ${seconds(open.readMs)}, ${megabytes(open.bytes)} read` : ''}`);
   return lines.length ? `<h4>Timings</h4>${lines.map(l => `<p class="dim">${l}</p>`).join('')}` : '';
 }
 

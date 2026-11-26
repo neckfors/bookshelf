@@ -87,21 +87,59 @@ class Books(private val resolver: ContentResolver) {
             file.close()
             return ByteArray(0)
         }
-        val picture = try {
-            renderer.use {
-                it.openPage((number - 1).coerceIn(0, it.pageCount - 1)).use { page ->
-                    val scale = min(width.toDouble() / page.width, height.toDouble() / page.height)
-                    val bitmap = Bitmap.createBitmap(
-                        max(1, (page.width * scale).roundToInt()), max(1, (page.height * scale).roundToInt()),
-                        Bitmap.Config.ARGB_8888,
-                    )
-                    bitmap.eraseColor(Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    bitmap
-                }
-            }
+        return try {
+            renderer.use { draw(it, number, width, height) }
         } catch (e: Exception) {
-            return ByteArray(0)
+            ByteArray(0)
+        }
+    }
+
+    // The book being read stays open, so each page is drawn without opening the file again.
+    private var viewing: PdfRenderer? = null
+    private var viewingFile = ""
+
+    private fun viewer(tree: Uri, path: String): PdfRenderer {
+        val file = open(tree, path)
+        val book = known[tree.toString()]?.get(path)
+        val name = "$tree|$path|${book?.size}|${book?.modified}"
+        viewing?.let {
+            if (name == viewingFile) {
+                file.close()
+                return it
+            }
+            it.close()
+            viewing = null
+        }
+        val renderer = try {
+            PdfRenderer(file)
+        } catch (e: Exception) {
+            file.close()
+            throw e
+        }
+        viewingFile = name
+        return renderer.also { viewing = it }
+    }
+
+    /** The number of pages, and the width and height of one of them. */
+    fun size(tree: Uri, path: String, number: Int): IntArray {
+        val renderer = viewer(tree, path)
+        return renderer.openPage(number - 1).use { intArrayOf(renderer.pageCount, it.width, it.height) }
+    }
+
+    /** A page of the book being read. This and size() are only called from one thread. */
+    fun view(tree: Uri, path: String, number: Int, width: Int, height: Int): ByteArray =
+        draw(viewer(tree, path), number, width, height)
+
+    private fun draw(renderer: PdfRenderer, number: Int, width: Int, height: Int): ByteArray {
+        val picture = renderer.openPage((number - 1).coerceIn(0, renderer.pageCount - 1)).use { page ->
+            val scale = min(width.toDouble() / page.width, height.toDouble() / page.height)
+            val bitmap = Bitmap.createBitmap(
+                max(1, (page.width * scale).roundToInt()), max(1, (page.height * scale).roundToInt()),
+                Bitmap.Config.ARGB_8888,
+            )
+            bitmap.eraseColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            bitmap
         }
         val out = ByteArrayOutputStream()
         picture.compress(Bitmap.CompressFormat.JPEG, 90, out)

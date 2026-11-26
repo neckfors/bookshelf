@@ -30,6 +30,8 @@ class Content(private val context: Context) {
     // Four at a time was clearly faster than one on the tablet.
     private val pages = Executors.newFixedThreadPool(4)
     private val others = Executors.newFixedThreadPool(4)
+    // The open book has its own, so covers being made never hold it up.
+    private val reader = Executors.newSingleThreadExecutor()
 
     fun answer(request: WebResourceRequest): WebResourceResponse? {
         val url = request.url
@@ -56,6 +58,13 @@ class Content(private val context: Context) {
             }
             "read" -> later("application/octet-stream", others) {
                 books.read(tree, text("path"), number("start"), number("end"))
+            }
+            "size" -> later("application/json", reader) {
+                val size = books.size(tree, text("path"), number("page").toInt())
+                JSONObject().put("count", size[0]).put("width", size[1]).put("height", size[2]).toString().toByteArray()
+            }
+            "view" -> later("image/jpeg", reader) {
+                books.view(tree, text("path"), number("page").toInt(), number("w").toInt(), number("h").toInt())
             }
             "page" -> later("image/jpeg", pages) {
                 books.page(tree, text("path"), number("page").toInt(), number("w").toInt(), number("h").toInt())
