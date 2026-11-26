@@ -1,14 +1,18 @@
 # Bookshelf
 
-An installable web app for browsing and reading your own PDF books, made for a tablet.
+An app for browsing and reading your own PDF books, made for a tablet.
 The books stay on your device; nothing is uploaded.
 
-**Open it:** https://neckfors.github.io/bookshelf/
+It comes in two forms with the same screens and features:
+- **Android app** (recommended on Android, as it gets at the files faster):
+  [download the APK](https://github.com/neckfors/bookshelf/releases/latest). See [Android app](#android-app).
+- **Web app** to install from the browser: https://neckfors.github.io/bookshelf/
 
 ## Browsing
 - Front covers only, in equal tiles. The whole cover is shown, with a blurred frame filling the gaps.
   White scan borders are trimmed. A book with a blank, locked or broken first page gets a title cover.
-- Folders with book counts, favorite folders and favorite books.
+- Folders with book counts, favorite folders and favorite books. Only folders that hold books themselves
+  are listed, with the folders above them shown beside the count.
 - Search in file and folder names (accents don't matter), everywhere or in the open folder.
 - 2 to 10 columns, set separately for portrait and landscape.
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed
@@ -22,8 +26,9 @@ The books stay on your device; nothing is uploaded.
   The start and end of each file are read in advance, so often little more is needed.
   Up to 4 background workers turn the data into finished tiles, without holding up scrolling.
 - Books are listed from their file names first, so they appear right away; checking for changed files
-  happens afterwards. Covers are made in the order you look at them:
-  the ones on screen from the top, then the ones below. Scroll further and the work moves with you.
+  happens afterwards. Covers are made once all books are listed, in the order you look at them:
+  the ones on screen from the top, then the ones below. They also appear in that order (one that is
+  slow holds back the next ones for at most 1.5 s). Scroll further and the work moves with you.
   Settings shows how long finding books, making covers and opening a book took, step by step.
   **Test file speed** measures how fast the device hands over files and gives a report you can copy.
 
@@ -39,7 +44,7 @@ The books stay on your device; nothing is uploaded.
 - A book opens where you left it. If the last page was showing when you left, it starts from the beginning.
   Turning past the last page closes the book.
 
-## Using it
+## Using the web app
 Open the app in Chrome, install it from the browser menu, then tap **Choose folder** and pick the
 folder with your PDFs (subfolders are included). If Chrome asks for access again later, tap **Allow**.
 
@@ -56,22 +61,39 @@ Settings and favorites are stored in the browser, so clearing the site's data re
 | `js/reader.js`, `js/gestures.js` | Reader and touch handling |
 | `js/library.js` | Folder scanning and the cover queue |
 | `js/covers.js`, `js/coverworker.js`, `js/scan.js`, `js/tile.js` | Making covers: fetching, drawing, scanned pictures, tiles |
-| `js/speedtest.js` | File speed test |
+| `js/speedtest.js` | File speed test (web app only) |
+| `js/native.js` | What differs in the Android app: folder access, front pages, full screen |
 | `js/db.js`, `js/pdf.js`, `js/update.js`, `js/util.js` | Storage, PDF loading, updates, helpers |
-| `sw.js` | Offline use. Raise `VERSION` for each release |
+| `sw.js` | Offline use. Raise `VERSION` for each release; the Android app takes its version from it |
+| `android/` | The Android app. The web files are copied into it when it is built |
+| `release.ps1`, `version.json` | Publishing an Android release; `version.json` is made by the first one |
 
 To run it locally: `py -3 -m http.server 8123`, then open `http://localhost:8123`.
 
-## Android app (in progress)
+## Android app
+For Android 8 or newer. It shows the same pages as the web app, from inside the APK, so the two stay alike.
+Android gets at the book folder and draws the front pages itself.
 
-Chrome on a tablet reads files one at a time, so an Android app is being looked into. `android/` currently
-holds only a **speed test**: you choose the book folder, and it shows how long Android takes to find the
-books and draw their front pages. It reads the folder, changes nothing and sends nothing anywhere.
+**Install:** download the APK from the [newest release](https://github.com/neckfors/bookshelf/releases/latest),
+open it, and allow your browser or file manager to install apps when asked. Then tap **Choose folder**.
+Android doesn't allow choosing the Download folder itself, only folders inside it.
 
-Build it with Android Studio's Java:
+- Favorites, layouts, bookmarks and reading positions from the web app are not carried over.
+- The first book you open needs a network connection to fetch pdf.js from jsDelivr; it is then kept,
+  and the app works offline.
+- Reading is full screen and keeps the screen on. **Back** closes an open sheet or book.
+- **Updates:** the app compares itself with `version.json` here on GitHub when you return to it and every
+  30 minutes, or when you tap **Check for updates** in Settings. When there is a new version, a bar with **Update** opens the download page. Install the
+  new APK over the old one; your settings stay.
+- It asks for network access only (for pdf.js and the update check). It can only read the folder you choose.
+
+**Build** with Android Studio's Java:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'; .\android\gradlew.bat -p android assembleRelease
 ```
 
-The APK ends up in `android/app/build/outputs/apk/release/`.
+The APK ends up in `android/app/build/outputs/apk/release/`. It is signed with the building computer's
+debug key, and an update only installs over an app signed with the same key.
+
+**Release:** raise `VERSION` in `sw.js`, commit and push, then run `.\release.ps1`.

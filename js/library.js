@@ -3,6 +3,7 @@ import * as db from './db.js';
 import { makeCover, warmDrawers, setDrawOrder } from './covers.js';
 import { warmUp } from './pdf.js';
 import { byName } from './util.js';
+import { app, nativeRoot } from './native.js';
 
 export const lib = {
   root: null,
@@ -13,6 +14,7 @@ export const lib = {
   reading: false,
   timings: {},
   onChange: () => {},
+  onFound: () => {},  // must draw all tiles at once, so the cover order follows the screen
   onCover: () => {},
   onStatus: () => {},
 };
@@ -23,7 +25,7 @@ export async function load() {
   lib.timings = timings || {};
   books.forEach(b => lib.books.set(b.path, b));
   states.forEach(s => lib.states.set(s.path, s));
-  lib.root = root || null;
+  lib.root = root?.native ? nativeRoot(root.native) : root || null;
   if (lib.root) warmUp();
   lib.favFolders = favs || [];
 }
@@ -52,7 +54,7 @@ export async function setRoot(handle) {
   const same = lib.root && await lib.root.isSameEntry(handle);
   lib.root = handle;
   handles.clear();
-  await db.kvSet('root', handle);
+  await db.kvSet('root', handle.stored || handle);
   if (!same) {
     lib.books.clear();
     await db.clear('books');
@@ -173,10 +175,14 @@ async function coverLane(current, lane) {
       const path = nextJob(current.queue);
       current.queue.delete(path);
       const started = performance.now(), stats = coverStats();
-      try { await refreshCover(path, { stats }); }
+      flying.set(path, { shownAt: 0 });
+      try { await refreshCover(path, { stats, show: ready }); }
       catch (e) {
         console.error(path, e);
         if (e?.name === 'ReaderLoadError') throw e;
+      } finally {
+        // Nothing to show (it failed or was replaced): the books behind it need not wait.
+        if (!flying.get(path)?.readyAt) { flying.delete(path); reveal(); }
       }
       current.done++;
       current.jobMs += performance.now() - started;
@@ -191,6 +197,31 @@ async function coverLane(current, lane) {
     current.error = e;
   } finally {
     lane.busy = false;
+  }
+}
+
+// Several books are made at once and don't finish in order. A finished cover waits for the ones that are
+// looked at before it, so they appear in order, but never for long.
+const HOLD = 1500;
+const flying = new Map(); // path -> { readyAt }
+function ready(path) {
+  const entry = flying.get(path);
+  if (!entry) return lib.onCover(path);
+  entry.readyAt = performance.now();
+  setTimeout(reveal, HOLD + 20);
+  reveal();
+}
+function reveal() {
+  const rank = new Map(viewOrder().map((path, i) => [path, i]));
+  const of = path => rank.get(path) ?? Infinity;
+  let blocked = false;
+  for (const path of [...flying.keys()].sort((a, b) => of(a) - of(b) || byName(a, b))) {
+    const { readyAt } = flying.get(path);
+    if (!readyAt) blocked = true;
+    else if (!blocked || performance.now() - readyAt >= HOLD) {
+      flying.delete(path);
+      lib.onCover(path);
+    }
   }
 }
 
@@ -242,10 +273,12 @@ async function scanOnce() {
   const began = performance.now();
   const found = new Set(), known = [];
   let batch = [];
+  const toMake = [];
   const flush = async () => {
     const added = await addFound(batch);
     batch = [];
-    addJobs(added);
+    toMake.push(...added);
+    current.total = toMake.length;
     showStatus();
     notify();
   };
@@ -259,6 +292,11 @@ async function scanOnce() {
       if (batch.length >= 12) await flush();
     }
     if (batch.length) await flush();
+    // Covers are started only now: the folder lists files in no particular order, and with every tile
+    // on screen the first book to make is the first one seen.
+    lib.onFound();
+    current.total = 0;
+    addJobs(toMake);
     // Only reached when the whole folder was read, so an error never removes books.
     for (const path of [...lib.books.keys()]) if (!found.has(path)) {
       lib.books.delete(path);
@@ -291,7 +329,7 @@ export async function refreshCover(path, tools = {}) {
   if (lib.books.get(path) !== book) return;
   Object.assign(book, { cover, stale: false, size: file.size, mtime: file.lastModified });
   // Shown first: saving does not need to be waited for to see it.
-  lib.onCover(path);
+  (tools.show || lib.onCover)(path);
   const drawn = performance.now();
   await db.put('books', book);
   if (tools.stats) tools.stats.saveMs += performance.now() - drawn;

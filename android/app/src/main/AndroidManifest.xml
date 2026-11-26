@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- For the PDF reader's code and for looking for new versions. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
-        android:label="Bookshelf speed test"
+        android:label="Bookshelf"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:enableOnBackInvokedCallback="false"
+        android:theme="@style/Theme.Bookshelf">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|density|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

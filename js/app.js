@@ -4,7 +4,8 @@ import { showSpeedTest } from './speedtest.js';
 import * as db from './db.js';
 import { $, ICON, esc, bookName, parentOf, plural, byName, fold, openSheet, closeSheet } from './util.js';
 import { openBook, closeBook, isReading } from './reader.js';
-import { setupUpdates, appVersion } from './update.js';
+import { setupUpdates, appVersion, checkAppUpdate } from './update.js';
+import { app } from './native.js';
 
 const { lib } = data;
 const urls = new Map(); // path -> { blob, url }
@@ -40,13 +41,31 @@ function folderCounts() {
   return counts;
 }
 
+// Only folders with books of their own are listed. One that just holds other folders is skipped,
+// and those folders are listed in its place.
+const foldersWithBooks = () => new Set([...lib.books.keys()].map(parentOf).filter(Boolean));
+function foldersIn(listed, parent) {
+  const prefix = parent ? `${parent}/` : '';
+  return [...listed].filter(path => {
+    if (!path.startsWith(prefix)) return false;
+    for (let up = parentOf(path); up !== parent; up = parentOf(up)) if (listed.has(up)) return false;
+    return true;
+  }).sort(byName);
+}
+
 const leaf = path => path.split('/').pop();
 const folderCard = (path, sub, star) => `<button class="folder" data-folder="${esc(path)}">${ICON.folder}${star ? '<em>★</em>' : ''}<b>${esc(leaf(path))}</b><span>${esc(sub)}</span></button>`;
+// The skipped folders between the one being looked at and a listed one, to tell equal names apart.
+function where(path, from) {
+  const between = parentOf(path).slice(from.length).replace(/^\//, '');
+  return between ? ` · ${between.replaceAll('/', ' › ')}` : '';
+}
 const section = (title, note = '') => `<h2>${title}<small>${note}</small></h2>`;
 const empty = (text, button = '') => `<div class="empty">${text}${button ? `<br>${button}` : ''}</div>`;
 
 function render() {
   const counts = folderCounts();
+  const listed = foldersWithBooks();
   const all = [...lib.books.keys()].sort(byName);
   const inFolder = view.type === 'folder' && view.path !== '';
   const home = view.type === 'folder' && view.path === '';
@@ -59,7 +78,7 @@ function render() {
   $('title').textContent = home ? 'Bookshelf' : view.type === 'favorites' ? 'Favorite books' : leaf(view.path);
   const inside = inFolder ? all.filter(p => p.startsWith(`${view.path}/`)) : [];
   const direct = all.filter(p => parentOf(p) === (inFolder ? view.path : ''));
-  $('subtitle').textContent = lib.status || (home ? `${plural(all.length, 'book')} in ${plural(counts.size, 'folder')}`
+  $('subtitle').textContent = lib.status || (home ? `${plural(all.length, 'book')} in ${plural(listed.size, 'folder')}`
     : view.type === 'favorites' ? plural(favBooks.length, 'book')
       : `${plural(inside.length, 'book')}, including subfolders · ${direct.length} here`);
   $('search').placeholder = inFolder ? `Search in ${leaf(view.path)} or everywhere` : 'Search books and folders';
@@ -76,7 +95,7 @@ function render() {
     const words = fold(query).split(/\s+/).filter(Boolean);
     const match = name => words.every(w => fold(name).includes(w));
     const scope = p => !(onlyHere && inFolder) || p.startsWith(`${view.path}/`);
-    const folders = [...counts.keys()].filter(p => scope(p) && match(leaf(p))).sort(byName);
+    const folders = [...listed].filter(p => scope(p) && match(leaf(p))).sort(byName);
     shown = all.filter(p => scope(p) && match(bookName(p)));
     if (inFolder) html += `<div class="chips"><button class="chip ${onlyHere ? '' : 'on'}" data-act="everywhere">All folders</button><button class="chip ${onlyHere ? 'on' : ''}" data-act="here">Only ${esc(leaf(view.path))}</button></div>`;
     if (folders.length) html += section('Folders', folders.length) + `<div class="folders">${folders.map(p =>
@@ -87,15 +106,15 @@ function render() {
     shown = favBooks;
     html = shown.length ? '<h2></h2>' + grid(shown) : empty('No favorite books yet.<br>Open a book, tap the middle of the page, then tap the star.');
   } else {
-    const favs = lib.favFolders.filter(p => counts.has(p)).sort(byName);
+    const favs = lib.favFolders.filter(p => listed.has(p)).sort(byName);
     if (home && (favs.length || favBooks.length)) {
       html += section('Favorites') + '<div class="folders">' +
         (favBooks.length ? `<button class="folder" data-act="favorites">${ICON.star}<b>Favorite books</b><span>${plural(favBooks.length, 'book')}</span></button>` : '') +
         favs.map(p => folderCard(p, plural(counts.get(p), 'book'), true)).join('') + '</div>';
     }
-    const subs = [...counts.keys()].filter(p => parentOf(p) === view.path).sort(byName);
+    const subs = foldersIn(listed, view.path);
     if (subs.length) html += section('Folders') + `<div class="folders">${subs.map(p =>
-      folderCard(p, plural(counts.get(p), 'book'), lib.favFolders.includes(p))).join('')}</div>`;
+      folderCard(p, `${plural(counts.get(p), 'book')}${where(p, view.path)}`, lib.favFolders.includes(p))).join('')}</div>`;
     shown = home ? all : direct;
     if (shown.length) html += section(home ? 'All books' : 'Books', shown.length) + grid(shown);
     if (!html) html = empty(lib.status ? 'Looking for books…' : hasAccess ? 'No PDF files found here.' : 'No saved books yet.');
@@ -126,7 +145,8 @@ function timingsHtml() {
   const { find, covers, open } = data.lib.timings;
   const lines = [];
   if (find) lines.push(`Last check: ${plural(find.files, 'book')} found in ${seconds(find.ms)}`);
-  if (covers) {
+  if (covers && window.AndroidBridge) lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)} (${(covers.count / covers.ms * 1000).toFixed(1)} a second)`);
+  else if (covers) {
     const each = key => seconds((covers[key] || 0) / covers.count);
     lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)} (${(covers.count / covers.ms * 1000).toFixed(1)} a second, ${covers.lanes || 3} at a time). Per book ${each('jobMs')}: finding the file ${each('fileMs')}, first read ${each('firstMs')}, waiting to draw ${each('waitMs')}, more reading ${each('readMs')}, picture ${each('drawMs')}, tile ${each('tileMs')}, saving ${each('saveMs')}. ${megabytes(covers.bytes / covers.count)} in ${((covers.reads || 0) / covers.count).toFixed(1)} reads per book, ${covers.direct || 0} scanned pictures taken directly`);
   }
@@ -138,6 +158,7 @@ let renderTimer = 0;
 const renderSoon = () => { renderTimer ||= setTimeout(() => { renderTimer = 0; render(); }, 100); };
 
 lib.onChange = renderSoon;
+lib.onFound = () => { if (!isReading()) render(); };
 lib.onCover = path => {
   document.querySelectorAll('.tile').forEach(el => { if (el.dataset.book === path) el.innerHTML = tileInner(path); });
 };
@@ -211,10 +232,11 @@ $('menuBtn').onclick = async () => {
     <h4>Library</h4>
     <button class="wide" data-act="rescan">Check for new and changed books</button>
     <button class="wide" data-act="covers">Refresh all covers</button>
-    <button class="wide" data-act="speed">Test file speed</button>
+    ${app ? '' : '<button class="wide" data-act="speed">Test file speed</button>'}
     <button class="wide" data-act="pick">${lib.root ? 'Change book folder' : 'Choose book folder'}</button>
     ${timingsHtml()}
-    <p class="dim" id="version" style="margin-top:16px"></p>`);
+    <p class="dim" id="version" style="margin-top:16px"></p>
+    ${app ? '<button class="wide" data-act="update">Check for updates</button>' : ''}`);
   sheet.onclick = async e => {
     const el = e.target.closest('button');
     if (!el) return;
@@ -223,6 +245,11 @@ $('menuBtn').onclick = async () => {
       $('colCount').textContent = columns[side];
       applyColumns();
       db.kvSet('columns', columns);
+      return;
+    }
+    if (el.dataset.act === 'update') {
+      el.textContent = 'Checking…';
+      el.textContent = await checkAppUpdate();
       return;
     }
     closeSheet();

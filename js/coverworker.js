@@ -122,7 +122,22 @@ async function draw(lib, { file, chunks, coverPage, coverPart }, stats) {
 // Errors that say the file could not be read; any other failure gives the book a title cover.
 const FILE_ERRORS = ['NotFoundError', 'NotAllowedError', 'NotReadableError'];
 
+// A front page that Android has already drawn. An empty one means the PDF can't be shown.
+async function framePicture({ picture, path, coverPart }) {
+  if (!picture.size) return titleTile(path);
+  const bitmap = await createImageBitmap(picture);
+  const art = new OffscreenCanvas(bitmap.width, bitmap.height);
+  art.getContext('2d').drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return finishTile(art, path, coverPart);
+}
+
 onmessage = async ({ data }) => {
+  if (data.picture) {
+    const started = performance.now();
+    const blob = await framePicture(data).catch(e => { console.error(e); return titleTile(data.path); });
+    return postMessage({ blob, stats: { tileMs: performance.now() - started } });
+  }
   let lib;
   try {
     lib = await load();

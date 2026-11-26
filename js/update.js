@@ -1,6 +1,29 @@
 import { $ } from './util.js';
+import { app } from './native.js';
+
+// The Android app compares itself with the newest release on GitHub.
+const LATEST = 'https://raw.githubusercontent.com/neckfors/bookshelf/main/version.json';
+// Shows the bar if there is a newer version, and says what was found.
+export async function checkAppUpdate() {
+  try {
+    const response = await fetch(`${LATEST}?t=${Date.now()}`, { cache: 'no-store' });
+    if (response.status === 404) return 'You have the newest version'; // nothing released yet
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!((await response.json()).versionCode > app.versionCode())) return 'You have the newest version';
+    $('update').hidden = false;
+    $('updateBtn').onclick = () => app.openDownloads();
+    return 'New version available';
+  } catch { return 'Could not check. Are you online?'; }
+}
+
+function setupAppUpdates() {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkAppUpdate(); });
+  setInterval(checkAppUpdate, 30 * 60 * 1000);
+  checkAppUpdate();
+}
 
 export async function setupUpdates() {
+  if (app) return setupAppUpdates();
   if (!('serviceWorker' in navigator)) return;
   let asked = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (asked) location.reload(); });
@@ -23,6 +46,7 @@ export async function setupUpdates() {
 }
 
 export function appVersion() {
+  if (app) return Promise.resolve(app.versionName());
   const worker = navigator.serviceWorker?.controller;
   if (!worker) return Promise.resolve('');
   return new Promise(resolve => {

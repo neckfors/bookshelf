@@ -31,5 +31,11 @@ export function closeSheet() {
   onSheetClose = null;
   done?.();
 }
+// The Android app asks this first when Back is pressed.
+globalThis.closeOpenSheet = () => {
+  if ($('sheetBack').hidden) return false;
+  closeSheet();
+  return true;
+};
 // Sorted by the file or folder name; the full path only decides ties.
 export const byName = (a, b) => natural(a.split('/').pop(), b.split('/').pop()) || natural(a, b);

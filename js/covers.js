@@ -1,5 +1,8 @@
 // Makes covers in two stages. Waiting for the file is the slow part on Android, so the next books are
 // fetched while a few workers turn already fetched data into pictures.
+import { pageBox } from './tile.js';
+import { app } from './native.js';
+
 const WHOLE = 2 << 20, HEAD = 768 << 10, TAIL = 192 << 10;
 const DRAWERS = Math.min(4, Math.max(2, (navigator.hardwareConcurrency || 4) - 2));
 
@@ -42,7 +45,7 @@ function newDrawer() {
           if (data.error) failed(data.error); else resolve(data.blob);
         };
         worker.onerror = e => { e.preventDefault(); failed({ name: 'ReaderLoadError', message: e.message || 'The cover reader could not be started' }); };
-        worker.postMessage(job, job.chunks.map(c => c.data.buffer));
+        worker.postMessage(job, (job.chunks || []).map(c => c.data.buffer));
       });
     },
   };
@@ -50,7 +53,8 @@ function newDrawer() {
 
 const free = Array.from({ length: DRAWERS }, newDrawer);
 const waiting = [];
-export const warmDrawers = () => free.forEach(d => d.warm());
+// The Android app draws pages itself, so there is no PDF engine to load.
+export const warmDrawers = () => { if (!app) free.forEach(d => d.warm()); };
 
 // When a worker gets free it takes the waiting book that is most wanted right now.
 let viewOrder = () => [];
@@ -67,12 +71,20 @@ function release(drawer) {
 }
 
 export async function makeCover(file, path, options = {}, { stats } = {}) {
-  const chunks = await prefetch(file, stats);
+  // In the Android app the page arrives drawn; a worker only turns it into a tile.
+  let picture, chunks;
+  if (file.native) {
+    const started = performance.now();
+    picture = await file.frontPage(options.coverPage || 1, pageBox(options.coverPart && options.coverPart !== 'whole'));
+    if (stats) stats.firstMs += performance.now() - started;
+  } else chunks = await prefetch(file, stats);
   const asked = performance.now();
   const drawer = free.pop() || await new Promise(take => waiting.push({ path, take }));
   if (stats) stats.waitMs += performance.now() - asked;
   try {
-    return await drawer.run({ file, path, chunks, coverPage: options.coverPage, coverPart: options.coverPart }, stats);
+    const job = picture ? { picture, path, coverPart: options.coverPart }
+      : { file, path, chunks, coverPage: options.coverPage, coverPart: options.coverPart };
+    return await drawer.run(job, stats);
   } finally {
     release(drawer);
   }
