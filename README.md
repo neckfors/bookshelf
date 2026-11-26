@@ -14,8 +14,10 @@ The books stay on your device; nothing is uploaded.
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed
   automatically (by size and date). You can also refresh all covers.
 - Covers are drawn with PDFium (the engine in Chrome's own PDF viewer), which goes straight to the
-  front page and reads only a few small parts of each file.
-- Books appear while the folder is still being read. Covers are made in the order you look at them:
+  front page and reads only a few small parts of each file. A scanned front page (one JPEG picture) is
+  handed to the browser's own, much faster picture decoder. Several covers are made at once.
+- Books are listed from their file names first, so they appear right away; checking for changed files
+  happens afterwards. Covers are made in the order you look at them:
   the ones on screen from the top, then the ones below. Scroll further and the work moves with you.
   Settings shows how long finding books, making covers and opening a book took.
 

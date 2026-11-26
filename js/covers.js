@@ -18,7 +18,7 @@ export function coverWorker() {
         reject(Object.assign(new Error(error.message), { name: error.name }));
       };
       worker.onmessage = ({ data }) => {
-        if (stats && data.stats) { stats.bytes += data.stats.bytes; stats.readMs += data.stats.readMs; stats.reads += data.stats.reads; }
+        if (stats && data.stats) for (const [key, value] of Object.entries(data.stats)) stats[key] = (stats[key] || 0) + value;
         if (data.error) failed(data.error); else resolve(data.result);
       };
       worker.onerror = e => { e.preventDefault(); failed({ name: 'ReaderLoadError', message: e.message || 'The cover reader could not be started' }); };

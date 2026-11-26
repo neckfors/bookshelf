@@ -88,7 +88,7 @@ export function saveTiming(key, value) {
   lib.timings[key] = value;
   return db.kvSet('timings', lib.timings);
 }
-export const newStats = () => ({ bytes: 0, readMs: 0, reads: 0 });
+export const newStats = () => ({ bytes: 0, readMs: 0, reads: 0, drawMs: 0, direct: 0 });
 
 // While books are being found, redraw now and then instead of for every file.
 let lastNotify = 0;
@@ -129,7 +129,8 @@ function showStatus() {
   lib.status = parts.join(' · ');
 }
 
-const LANES = Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
+// Much of the time goes to waiting for the file, so several covers are worked on at once.
+const LANES = Math.min(6, Math.max(2, (navigator.hardwareConcurrency || 4) - 1));
 function addJobs(paths) {
   for (const path of paths) if (!run.queue.has(path)) { run.queue.add(path); run.total++; }
   if (run.queue.size) run.started ||= performance.now();
@@ -181,6 +182,8 @@ async function coverLane(current, lane) {
       current.readMs += stats.readMs;
       current.reads += stats.reads;
       current.fileMs += stats.fileMs || 0;
+      current.drawMs += stats.drawMs;
+      current.direct += stats.direct;
       current.ms = performance.now() - current.started;
       if (run === current) {
         showStatus();
@@ -195,33 +198,53 @@ async function coverLane(current, lane) {
   }
 }
 
-// Looks at several files at once and saves what is new or changed in one go.
-async function checkFiles(batch) {
-  const files = await Promise.all(batch.map(([, handle]) => handle.getFile()));
-  const changed = [];
-  batch.forEach(([path, handle], i) => {
+// Listing a folder only gives names, which is enough to show the books. New ones are added right away.
+async function addFound(batch) {
+  const added = [];
+  for (const [path, handle] of batch) {
     handles.set(path, handle);
-    const file = files[i], old = lib.books.get(path);
-    if (old && old.size === file.size && old.mtime === file.lastModified) return;
-    // A changed file keeps showing its old cover until the new one is ready.
-    const book = { path, size: file.size, mtime: file.lastModified, cover: old?.cover || null, stale: true };
+    if (lib.books.has(path)) continue;
+    const book = { path, size: null, mtime: null, cover: null, stale: true };
     lib.books.set(path, book);
-    changed.push(book);
-  });
-  if (changed.length) await db.putMany('books', changed);
-  return changed.map(b => b.path);
+    added.push(book);
+  }
+  if (added.length) await db.putMany('books', added);
+  return added.map(b => b.path);
+}
+
+// Asking for a file's size and date is slow on Android, so changed files are looked for afterwards.
+async function checkChanged(root, paths) {
+  for (let i = 0; i < paths.length && lib.root === root; i += 4) {
+    while (lib.reading) await sleep(500);
+    const changed = [];
+    await Promise.all(paths.slice(i, i + 4).map(async path => {
+      const book = lib.books.get(path);
+      if (!book || book.stale) return;
+      try {
+        const file = await fileFor(path);
+        if (book.size === file.size && book.mtime === file.lastModified) return;
+        // A changed file keeps showing its old cover until the new one is ready.
+        book.stale = true;
+        changed.push(book);
+      } catch (e) { console.warn(path, e); }
+    }));
+    if (changed.length && lib.root === root) {
+      await db.putMany('books', changed);
+      addJobs(changed.map(b => b.path));
+    }
+  }
 }
 
 async function scanOnce() {
   const root = lib.root;
   const current = startRun();
   const began = performance.now();
-  const found = new Set();
+  const found = new Set(), known = [];
   let batch = [];
   const flush = async () => {
-    const changed = await checkFiles(batch);
+    const added = await addFound(batch);
     batch = [];
-    addJobs(changed);
+    addJobs(added);
     showStatus();
     notify();
   };
@@ -231,6 +254,7 @@ async function scanOnce() {
     for await (const entry of walk(root, '')) {
       if (lib.root !== root) { again = true; current.queue.clear(); return; }
       found.add(entry[0]);
+      if (lib.books.has(entry[0])) known.push(entry[0]);
       current.found = found.size;
       batch.push(entry);
       if (batch.length >= 12) await flush();
@@ -247,10 +271,14 @@ async function scanOnce() {
     current.finding = false;
     showStatus();
     lib.onChange();
+    // New covers come first: both jobs would be waiting for the same files.
+    await Promise.all(current.lanes.map(l => l.promise));
+    if (!current.error) await checkChanged(root, known);
   } finally {
     current.finding = false;
     await Promise.all(current.lanes.map(l => l.promise));
-    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs, reads: current.reads, fileMs: current.fileMs });
+    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs, reads: current.reads, fileMs: current.fileMs,
+      drawMs: current.drawMs, direct: current.direct, lanes: LANES });
   }
   if (current.error) throw current.error;
 }
@@ -263,8 +291,7 @@ export async function refreshCover(path, tools = {}) {
   if (tools.stats) tools.stats.fileMs = performance.now() - began;
   const cover = await makeCover(file, path, stateOf(path), tools);
   if (lib.books.get(path) !== book) return;
-  book.cover = cover;
-  book.stale = false;
+  Object.assign(book, { cover, stale: false, size: file.size, mtime: file.lastModified });
   await db.put('books', book);
   lib.onCover(path);
 }
