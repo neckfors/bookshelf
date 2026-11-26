@@ -11,6 +11,12 @@ gets at the files faster.
 There is also a [web app](https://neckfors.github.io/bookshelf/) with the same screens and features,
 to install from the browser.
 
+<img src="screenshots/library.png" width="400" alt="The library: front covers and folders">
+
+<img src="screenshots/reading.png" width="640" alt="Reading, two pages at a time">
+
+<img src="screenshots/settings.png" width="640" alt="The settings for one book">
+
 ## Browsing
 - Front covers only, with nothing around them. Each takes an equally sized space and is shown whole, in
   its own shape. White scan borders are trimmed. A book with a blank, locked or broken first page gets
