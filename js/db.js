@@ -25,6 +25,7 @@ async function run(store, mode, fn) {
 
 export const getAll = store => run(store, 'readonly', s => s.getAll());
 export const put = (store, value, key) => run(store, 'readwrite', s => s.put(value, key));
+export const putMany = (store, values) => run(store, 'readwrite', s => { values.forEach(v => s.put(v)); });
 export const del = (store, key) => run(store, 'readwrite', s => s.delete(key));
 export const clear = store => run(store, 'readwrite', s => s.clear());
 export const kvGet = key => run('kv', 'readonly', s => s.get(key));

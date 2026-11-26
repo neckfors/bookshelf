@@ -1,6 +1,7 @@
 // The collection: saved covers, per-book state, and checking the folder for changes.
 import * as db from './db.js';
 import { makeCover } from './covers.js';
+import { newWorker } from './pdf.js';
 
 export const lib = {
   root: null,
@@ -8,13 +9,17 @@ export const lib = {
   states: new Map(),  // path -> per-book settings
   favFolders: [],
   status: '',
+  reading: false,
+  timings: {},
   onChange: () => {},
   onCover: () => {},
+  onStatus: () => {},
 };
 
 export async function load() {
-  const [books, states, root, favs] = await Promise.all(
-    [db.getAll('books'), db.getAll('state'), db.kvGet('root'), db.kvGet('favFolders')]);
+  const [books, states, root, favs, timings] = await Promise.all(
+    [db.getAll('books'), db.getAll('state'), db.kvGet('root'), db.kvGet('favFolders'), db.kvGet('timings')]);
+  lib.timings = timings || {};
   books.forEach(b => lib.books.set(b.path, b));
   states.forEach(s => lib.states.set(s.path, s));
   lib.root = root || null;
@@ -67,16 +72,32 @@ async function* walk(dir, prefix) {
   }
 }
 
+// How long the last check, cover run and book opening took (shown in Settings).
+export function saveTiming(key, value) {
+  lib.timings[key] = value;
+  return db.kvSet('timings', lib.timings);
+}
+export const newStats = () => ({ bytes: 0, readMs: 0 });
+
+// While books are being found, redraw now and then instead of for every file.
+let lastNotify = 0;
+function notify() {
+  if (performance.now() - lastNotify < 800) return;
+  lastNotify = performance.now();
+  lib.onChange();
+}
+
 let scanning = null, again = false;
 export function scan() {
   if (scanning) { again = true; return scanning; }
   return scanning = (async () => {
     try {
-      do { again = false; await scanOnce(); await buildCovers(); } while (again);
+      do { again = false; await scanOnce(); } while (again);
       lib.status = '';
     } catch (e) {
       console.error(e);
-      lib.status = 'Could not read the whole folder. Showing saved covers.';
+      lib.status = e?.name === 'ReaderLoadError' ? 'The PDF reader could not be loaded. Check the network and try again.'
+        : 'Could not read the whole folder. Showing saved covers.';
     } finally {
       scanning = null;
       lib.onChange();
@@ -84,54 +105,135 @@ export function scan() {
   })();
 }
 
-async function scanOnce() {
-  const root = lib.root;
-  const found = new Set();
-  let changed = false;
-  for await (const [path, handle] of walk(root, '')) {
-    if (lib.root !== root) { again = true; return; }
-    found.add(path);
-    const file = await handle.getFile();
-    const old = lib.books.get(path);
-    if (old && old.size === file.size && old.mtime === file.lastModified) continue;
+// Finding books and making covers run side by side, so covers appear while the folder is still being read.
+let run = null;
+function startRun() {
+  return run = { queue: new Set(), lanes: [], finding: true, found: 0, total: 0, done: 0, error: null, started: 0, ms: 0, jobMs: 0, ...newStats() };
+}
+
+function showStatus() {
+  const parts = [];
+  if (run.finding) parts.push(`Looking for books: ${run.found} found`);
+  if (run.total) parts.push(`Covers: ${run.done} of ${run.total}`);
+  lib.status = parts.join(' · ');
+}
+
+const LANES = Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
+function addJobs(paths) {
+  for (const path of paths) if (!run.queue.has(path)) { run.queue.add(path); run.total++; }
+  if (run.queue.size) run.started ||= performance.now();
+  let busy = run.lanes.filter(l => l.busy).length;
+  while (busy < LANES && busy < run.queue.size) {
+    const lane = { busy: true };
+    run.lanes.push(lane);
+    lane.promise = coverLane(run, lane);
+    busy++;
+  }
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Paths on screen are done first.
+let wanted = new Set();
+export const want = paths => { wanted = new Set(paths); };
+const workers = [];
+
+async function coverLane(current, lane) {
+  let worker;
+  try {
+    worker = workers.pop() || await newWorker();
+    while (current.queue.size && !current.error) {
+      // An open book gets all the speed.
+      if (lib.reading) { await sleep(500); continue; }
+      let path;
+      for (const p of wanted) if (current.queue.has(p)) { path = p; break; }
+      path ??= current.queue.values().next().value;
+      current.queue.delete(path);
+      const started = performance.now(), stats = newStats();
+      try { await refreshCover(path, { worker, stats }); }
+      catch (e) {
+        console.error(path, e);
+        if (e?.name === 'ReaderLoadError') throw e;
+      }
+      current.done++;
+      current.jobMs += performance.now() - started;
+      current.bytes += stats.bytes;
+      current.readMs += stats.readMs;
+      current.ms = performance.now() - current.started;
+      if (run === current) {
+        showStatus();
+        lib.onStatus();
+      }
+    }
+  } catch (e) {
+    current.error = e;
+  } finally {
+    lane.busy = false;
+    if (worker) workers.push(worker);
+  }
+}
+
+// Looks at several files at once and saves what is new or changed in one go.
+async function checkFiles(batch) {
+  const files = await Promise.all(batch.map(([, handle]) => handle.getFile()));
+  const changed = [];
+  batch.forEach(([path], i) => {
+    const file = files[i], old = lib.books.get(path);
+    if (old && old.size === file.size && old.mtime === file.lastModified) return;
     // A changed file keeps showing its old cover until the new one is ready.
     const book = { path, size: file.size, mtime: file.lastModified, cover: old?.cover || null, stale: true };
     lib.books.set(path, book);
-    await db.put('books', book);
-    changed = true;
-  }
-  // Only reached when the whole folder was read, so an error never removes books.
-  for (const path of [...lib.books.keys()]) if (!found.has(path)) {
-    lib.books.delete(path);
-    await db.del('books', path);
-    changed = true;
-  }
-  if (changed) lib.onChange();
+    changed.push(book);
+  });
+  if (changed.length) await db.putMany('books', changed);
+  return changed.map(b => b.path);
 }
 
-// Paths on screen are done first.
-export let wanted = new Set();
-export const want = paths => { wanted = new Set(paths); };
-
-async function buildCovers() {
-  const queue = new Set([...lib.books.values()].filter(b => b.stale).map(b => b.path));
-  const total = queue.size;
-  while (queue.size) {
-    const path = [...wanted].find(p => queue.has(p)) ?? queue.values().next().value;
-    queue.delete(path);
-    lib.status = `Creating covers: ${total - queue.size} of ${total}`;
-    try { await refreshCover(path); }
-    catch (e) {
-      console.error(path, e);
-      if (e?.name === 'ReaderLoadError') throw e;
+async function scanOnce() {
+  const root = lib.root;
+  const current = startRun();
+  const began = performance.now();
+  const found = new Set();
+  let batch = [];
+  const flush = async () => {
+    const changed = await checkFiles(batch);
+    batch = [];
+    addJobs(changed);
+    showStatus();
+    notify();
+  };
+  try {
+    // Covers left over from last time can start right away.
+    addJobs([...lib.books.values()].filter(b => b.stale).map(b => b.path));
+    for await (const entry of walk(root, '')) {
+      if (lib.root !== root) { again = true; current.queue.clear(); return; }
+      found.add(entry[0]);
+      current.found = found.size;
+      batch.push(entry);
+      if (batch.length >= 12) await flush();
     }
+    if (batch.length) await flush();
+    // Only reached when the whole folder was read, so an error never removes books.
+    for (const path of [...lib.books.keys()]) if (!found.has(path)) {
+      lib.books.delete(path);
+      current.queue.delete(path);
+      await db.del('books', path);
+    }
+    await saveTiming('find', { files: found.size, ms: performance.now() - began });
+    current.finding = false;
+    showStatus();
+    lib.onChange();
+  } finally {
+    current.finding = false;
+    await Promise.all(current.lanes.map(l => l.promise));
+    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs });
   }
+  if (current.error) throw current.error;
 }
 
-export async function refreshCover(path) {
+export async function refreshCover(path, tools = {}) {
   const book = lib.books.get(path);
   if (!book) return;
-  const cover = await makeCover(await fileFor(path), path, stateOf(path));
+  const cover = await makeCover(await fileFor(path), path, stateOf(path), tools);
   if (lib.books.get(path) !== book) return;
   book.cover = cover;
   book.stale = false;
@@ -140,9 +242,8 @@ export async function refreshCover(path) {
 }
 
 export async function refreshAll() {
-  for (const book of lib.books.values()) {
-    book.stale = true;
-    await db.put('books', book);
-  }
+  // New objects, so a cover that is being made right now is thrown away and redone.
+  for (const [path, book] of lib.books) lib.books.set(path, { ...book, stale: true });
+  await db.putMany('books', [...lib.books.values()]);
   return scan();
 }

@@ -87,8 +87,8 @@ function render() {
     shown = favBooks;
     html = shown.length ? '<h2></h2>' + grid(shown) : empty('No favorite books yet.<br>Open a book, tap the middle of the page, then tap the star.');
   } else {
-    if (home && (lib.favFolders.length || favBooks.length)) {
-      const favs = lib.favFolders.filter(p => counts.has(p)).sort(byName);
+    const favs = lib.favFolders.filter(p => counts.has(p)).sort(byName);
+    if (home && (favs.length || favBooks.length)) {
       html += section('Favorites') + '<div class="folders">' +
         (favBooks.length ? `<button class="folder" data-act="favorites">${ICON.star}<b>Favorite books</b><span>${plural(favBooks.length, 'book')}</span></button>` : '') +
         favs.map(p => folderCard(p, plural(counts.get(p), 'book'), true)).join('') + '</div>';
@@ -101,7 +101,32 @@ function render() {
     if (!html) html = empty(lib.status ? 'Looking for books…' : hasAccess ? 'No PDF files found here.' : 'No saved books yet.');
   }
   $('content').innerHTML = html;
+  watchTiles(shown);
+}
+
+// Tells the cover maker which books are on screen, so those come first.
+const onScreen = new Set();
+let watcher;
+function watchTiles(shown) {
+  watcher?.disconnect();
+  onScreen.clear();
   data.want(shown);
+  watcher = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) onScreen.add(e.target.dataset.book); else onScreen.delete(e.target.dataset.book);
+    data.want([...onScreen, ...shown]);
+  });
+  document.querySelectorAll('.tile').forEach(el => watcher.observe(el));
+}
+
+const seconds = ms => ms < 90000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`;
+const megabytes = bytes => `${(bytes / 1048576).toFixed(1)} MB`;
+function timingsHtml() {
+  const { find, covers, open } = data.lib.timings;
+  const lines = [];
+  if (find) lines.push(`Last check: ${plural(find.files, 'book')} found in ${seconds(find.ms)}`);
+  if (covers) lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)}. Per book: ${seconds(covers.jobMs / covers.count)}, of which reading ${seconds(covers.readMs / covers.count)}, ${megabytes(covers.bytes / covers.count)} read`);
+  if (open) lines.push(`Last book opened in ${seconds(open.ms)}: reading ${seconds(open.readMs)}, ${megabytes(open.bytes)} read`);
+  return lines.length ? `<h4>Timings</h4>${lines.map(l => `<p class="dim">${l}</p>`).join('')}` : '';
 }
 
 let renderTimer = 0;
@@ -110,8 +135,8 @@ const renderSoon = () => { renderTimer ||= setTimeout(() => { renderTimer = 0; r
 lib.onChange = renderSoon;
 lib.onCover = path => {
   document.querySelectorAll('.tile').forEach(el => { if (el.dataset.book === path) el.innerHTML = tileInner(path); });
-  $('subtitle').textContent = lib.status || $('subtitle').textContent;
 };
+lib.onStatus = () => { $('subtitle').textContent = lib.status || $('subtitle').textContent; };
 
 function applyColumns() {
   document.documentElement.style.setProperty('--cols', columns[portrait.matches ? 'portrait' : 'landscape']);
@@ -182,6 +207,7 @@ $('menuBtn').onclick = async () => {
     <button class="wide" data-act="rescan">Check for new and changed books</button>
     <button class="wide" data-act="covers">Refresh all covers</button>
     <button class="wide" data-act="pick">${lib.root ? 'Change book folder' : 'Choose book folder'}</button>
+    ${timingsHtml()}
     <p class="dim" id="version" style="margin-top:16px"></p>`);
   sheet.onclick = async e => {
     const el = e.target.closest('button');

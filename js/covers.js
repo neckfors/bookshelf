@@ -4,10 +4,10 @@ import { bookName } from './util.js';
 
 const W = 400, H = 600;
 
-export async function makeCover(file, path, options = {}) {
+export async function makeCover(file, path, options = {}, tools = {}) {
   let pdf;
   try {
-    pdf = await openPdf(file);
+    pdf = await openPdf(file, tools);
     const number = Math.min(Math.max(options.coverPage || 1, 1), pdf.numPages);
     const page = await pdf.getPage(number);
     const size = page.getViewport({ scale: 1 });

@@ -13,6 +13,8 @@ The books stay on your device; nothing is uploaded.
 - 2 to 10 columns, set separately for portrait and landscape.
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed
   automatically (by size and date). You can also refresh all covers.
+- Books appear while the folder is still being read, and covers on screen are made first.
+  Settings shows how long finding books, making covers and opening a book took.
 
 ## Reading
 - Fullscreen, portrait and landscape. Swipe or tap the sides to turn; tap the middle for the menu.

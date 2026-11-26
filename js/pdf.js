@@ -11,17 +11,31 @@ function lib() {
   });
 }
 
-// Reads the file in slices, so a large book is not loaded into memory to show one page.
-export async function openPdf(file) {
+// Starting a worker is slow, so workers are kept and reused instead of one per book.
+export async function newWorker() {
   const pdfjs = await lib();
+  return new pdfjs.PDFWorker();
+}
+let sharedWorker;
+
+// Reads the file in slices, so a large book is not loaded into memory to show one page.
+// stats (optional) collects how much was read and how long the reading took.
+export async function openPdf(file, { worker, stats } = {}) {
+  const pdfjs = await lib();
+  worker ??= await (sharedWorker ??= newWorker().catch(e => { sharedWorker = null; throw e; }));
   let task;
   class FileRange extends pdfjs.PDFDataRangeTransport {
     requestDataRange(begin, end) {
       // If the file can no longer be read, give up instead of waiting for ever.
-      file.slice(begin, end).arrayBuffer().then(buf => this.onDataRange(begin, new Uint8Array(buf)), () => task.destroy());
+      const started = performance.now();
+      file.slice(begin, end).arrayBuffer().then(buf => {
+        if (stats) { stats.bytes += buf.byteLength; stats.readMs += performance.now() - started; }
+        this.onDataRange(begin, new Uint8Array(buf));
+      }, () => task.destroy());
     }
   }
   task = pdfjs.getDocument({
+    worker,
     range: new FileRange(file.size, null),
     rangeChunkSize: 1 << 20,
     disableAutoFetch: true,

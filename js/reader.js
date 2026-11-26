@@ -45,8 +45,10 @@ export async function openBook(path) {
   $('rTitle').textContent = bookName(path);
   applyTone();
   keepAwake();
+  data.lib.reading = true;
+  const began = performance.now(), stats = data.newStats();
   try {
-    const pdf = await openPdf(await data.fileFor(path));
+    const pdf = await openPdf(await data.fileFor(path), { stats });
     if (book !== opening) { pdf.destroy(); return true; }
     book.pdf = pdf;
     book.count = pdf.numPages;
@@ -55,7 +57,10 @@ export async function openBook(path) {
     state.marks = state.marks.filter(m => m <= book.count);
     buildSpreads();
     await show();
-    if (book === opening) $('loading').hidden = true;
+    if (book === opening) {
+      $('loading').hidden = true;
+      data.saveTiming('open', { ms: performance.now() - began, bytes: stats.bytes, readMs: stats.readMs });
+    }
   } catch (e) {
     console.error(e);
     if (book === opening) {
@@ -77,6 +82,7 @@ export function closeBook() {
   save();
   book.pdf?.destroy();
   book = null;
+  data.lib.reading = false;
   $('reader').hidden = true;
   document.body.style.overflow = '';
   slots.forEach(s => s.replaceChildren());
