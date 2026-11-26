@@ -1,7 +1,8 @@
 // The collection: saved covers, per-book state, and checking the folder for changes.
 import * as db from './db.js';
-import { makeCover } from './covers.js';
-import { newWorker, warmUp } from './pdf.js';
+import { makeCover, coverWorker } from './covers.js';
+import { warmUp } from './pdf.js';
+import { byName } from './util.js';
 
 export const lib = {
   root: null,
@@ -50,6 +51,7 @@ export async function permission(ask = false) {
 export async function setRoot(handle) {
   const same = lib.root && await lib.root.isSameEntry(handle);
   lib.root = handle;
+  handles.clear();
   await db.kvSet('root', handle);
   if (!same) {
     lib.books.clear();
@@ -58,7 +60,15 @@ export async function setRoot(handle) {
   navigator.storage?.persist?.();
 }
 
+// File handles seen while reading the folder. Looking a file up again by name can be slow on Android,
+// where each step may mean listing a whole folder.
+const handles = new Map();
 export async function fileFor(path) {
+  const known = handles.get(path);
+  if (known) {
+    try { return await known.getFile(); }
+    catch { handles.delete(path); }
+  }
   const parts = path.split('/');
   let dir = lib.root;
   for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
@@ -78,7 +88,7 @@ export function saveTiming(key, value) {
   lib.timings[key] = value;
   return db.kvSet('timings', lib.timings);
 }
-export const newStats = () => ({ bytes: 0, readMs: 0 });
+export const newStats = () => ({ bytes: 0, readMs: 0, reads: 0 });
 
 // While books are being found, redraw now and then instead of for every file.
 let lastNotify = 0;
@@ -109,7 +119,7 @@ export function scan() {
 // Finding books and making covers run side by side, so covers appear while the folder is still being read.
 let run = null;
 function startRun() {
-  return run = { queue: new Set(), lanes: [], finding: true, found: 0, total: 0, done: 0, error: null, started: 0, ms: 0, jobMs: 0, ...newStats() };
+  return run = { queue: new Set(), lanes: [], finding: true, found: 0, total: 0, done: 0, error: null, started: 0, ms: 0, jobMs: 0, fileMs: 0, ...newStats() };
 }
 
 function showStatus() {
@@ -133,21 +143,31 @@ function addJobs(paths) {
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-// Paths on screen are done first.
-let wanted = new Set();
-export const want = paths => { wanted = new Set(paths); };
+// The browse view says what is being looked at: books on screen first, then the ones below, then above.
+// It is asked each time a cover is started, so after scrolling the work moves to where you stopped.
+let viewOrder = () => [];
+let scrolledAt = -1000;
+export const setViewOrder = fn => { viewOrder = fn; };
+export const scrolled = () => { scrolledAt = performance.now(); };
+function nextJob(queue) {
+  for (const path of viewOrder()) if (queue.has(path)) return path;
+  // Nothing in this view is waiting: carry on with the rest, in the order the library shows them.
+  let first;
+  for (const path of queue) if (first === undefined || byName(path, first) < 0) first = path;
+  return first;
+}
 const workers = [];
 
 async function coverLane(current, lane) {
   let worker;
   try {
-    worker = workers.pop() || await newWorker();
+    worker = workers.pop() || coverWorker();
     while (current.queue.size && !current.error) {
       // An open book gets all the speed.
       if (lib.reading) { await sleep(500); continue; }
-      let path;
-      for (const p of wanted) if (current.queue.has(p)) { path = p; break; }
-      path ??= current.queue.values().next().value;
+      // Nothing is started in the middle of a scroll; books that only fly past are left for later.
+      if (performance.now() - scrolledAt < 150) { await sleep(60); continue; }
+      const path = nextJob(current.queue);
       current.queue.delete(path);
       const started = performance.now(), stats = newStats();
       try { await refreshCover(path, { worker, stats }); }
@@ -159,6 +179,8 @@ async function coverLane(current, lane) {
       current.jobMs += performance.now() - started;
       current.bytes += stats.bytes;
       current.readMs += stats.readMs;
+      current.reads += stats.reads;
+      current.fileMs += stats.fileMs || 0;
       current.ms = performance.now() - current.started;
       if (run === current) {
         showStatus();
@@ -177,7 +199,8 @@ async function coverLane(current, lane) {
 async function checkFiles(batch) {
   const files = await Promise.all(batch.map(([, handle]) => handle.getFile()));
   const changed = [];
-  batch.forEach(([path], i) => {
+  batch.forEach(([path, handle], i) => {
+    handles.set(path, handle);
     const file = files[i], old = lib.books.get(path);
     if (old && old.size === file.size && old.mtime === file.lastModified) return;
     // A changed file keeps showing its old cover until the new one is ready.
@@ -227,7 +250,7 @@ async function scanOnce() {
   } finally {
     current.finding = false;
     await Promise.all(current.lanes.map(l => l.promise));
-    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs });
+    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs, reads: current.reads, fileMs: current.fileMs });
   }
   if (current.error) throw current.error;
 }
@@ -235,7 +258,10 @@ async function scanOnce() {
 export async function refreshCover(path, tools = {}) {
   const book = lib.books.get(path);
   if (!book) return;
-  const cover = await makeCover(await fileFor(path), path, stateOf(path), tools);
+  const began = performance.now();
+  const file = await fileFor(path);
+  if (tools.stats) tools.stats.fileMs = performance.now() - began;
+  const cover = await makeCover(file, path, stateOf(path), tools);
   if (lib.books.get(path) !== book) return;
   book.cover = cover;
   book.stale = false;

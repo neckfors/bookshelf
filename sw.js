@@ -1,14 +1,16 @@
-const VERSION = '1.3';
+const VERSION = '1.4';
 const SHELL = `bookshelf-${VERSION}`;
 const LIBS = 'bookshelf-pdfjs-4.10.38';
 const CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/';
+const PDFIUM = 'https://cdn.jsdelivr.net/npm/@embedpdf/pdfium@2.15.1/dist/';
 const FILES = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
-  'js/app.js', 'js/reader.js', 'js/gestures.js', 'js/library.js', 'js/covers.js', 'js/pdf.js', 'js/db.js', 'js/util.js', 'js/update.js'];
+  'js/app.js', 'js/reader.js', 'js/gestures.js', 'js/library.js', 'js/covers.js', 'js/coverworker.js', 'js/pdf.js', 'js/db.js', 'js/util.js', 'js/update.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(Promise.all([
     caches.open(SHELL).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))),
-    caches.open(LIBS).then(c => c.addAll([`${CDN}build/pdf.min.mjs`, `${CDN}build/pdf.worker.min.mjs`])),
+    caches.open(LIBS).then(c => c.addAll([`${CDN}build/pdf.min.mjs`, `${CDN}build/pdf.worker.min.mjs`,
+      `${PDFIUM}index.browser.js`, `${PDFIUM}pdfium.wasm`])),
   ]));
 });
 
@@ -26,7 +28,7 @@ self.addEventListener('message', event => {
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET') return;
-  const fromCdn = request.url.startsWith(CDN);
+  const fromCdn = request.url.startsWith(CDN) || request.url.startsWith(PDFIUM);
   if (!fromCdn && new URL(request.url).origin !== location.origin) return;
   event.respondWith(caches.open(fromCdn ? LIBS : SHELL).then(async cache => {
     const hit = await cache.match(request, { ignoreSearch: !fromCdn });

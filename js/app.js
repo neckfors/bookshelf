@@ -1,7 +1,7 @@
 // Browse view: home, folders, favorites and search.
 import * as data from './library.js';
 import * as db from './db.js';
-import { $, ICON, esc, bookName, parentOf, plural, natural, fold, openSheet, closeSheet } from './util.js';
+import { $, ICON, esc, bookName, parentOf, plural, byName, fold, openSheet, closeSheet } from './util.js';
 import { openBook, closeBook, isReading } from './reader.js';
 import { setupUpdates, appVersion } from './update.js';
 
@@ -41,7 +41,6 @@ function folderCounts() {
 
 const leaf = path => path.split('/').pop();
 const folderCard = (path, sub, star) => `<button class="folder" data-folder="${esc(path)}">${ICON.folder}${star ? '<em>★</em>' : ''}<b>${esc(leaf(path))}</b><span>${esc(sub)}</span></button>`;
-const byName = (a, b) => natural(leaf(a), leaf(b)) || natural(a, b);
 const section = (title, note = '') => `<h2>${title}<small>${note}</small></h2>`;
 const empty = (text, button = '') => `<div class="empty">${text}${button ? `<br>${button}` : ''}</div>`;
 
@@ -101,22 +100,24 @@ function render() {
     if (!html) html = empty(lib.status ? 'Looking for books…' : hasAccess ? 'No PDF files found here.' : 'No saved books yet.');
   }
   $('content').innerHTML = html;
-  watchTiles(shown);
 }
 
-// Tells the cover maker which books are on screen, so those come first.
-const onScreen = new Set();
-let watcher;
-function watchTiles(shown) {
-  watcher?.disconnect();
-  onScreen.clear();
-  data.want(shown);
-  watcher = new IntersectionObserver(entries => {
-    for (const e of entries) if (e.isIntersecting) onScreen.add(e.target.dataset.book); else onScreen.delete(e.target.dataset.book);
-    data.want([...onScreen, ...shown]);
-  });
-  document.querySelectorAll('.tile').forEach(el => watcher.observe(el));
+// Tells the cover maker the order the books are being looked at: from the top of the screen
+// downwards, then the ones above, nearest first.
+function viewOrder() {
+  const tiles = document.querySelectorAll('.tile');
+  let low = 0, high = tiles.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (tiles[mid].getBoundingClientRect().bottom <= 0) low = mid + 1; else high = mid;
+  }
+  const order = [];
+  for (let i = low; i < tiles.length; i++) order.push(tiles[i].dataset.book);
+  for (let i = low - 1; i >= 0; i--) order.push(tiles[i].dataset.book);
+  return order;
 }
+data.setViewOrder(viewOrder);
+addEventListener('scroll', data.scrolled, { capture: true, passive: true });
 
 const seconds = ms => ms < 90000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`;
 const megabytes = bytes => `${(bytes / 1048576).toFixed(1)} MB`;
@@ -124,7 +125,7 @@ function timingsHtml() {
   const { find, covers, open } = data.lib.timings;
   const lines = [];
   if (find) lines.push(`Last check: ${plural(find.files, 'book')} found in ${seconds(find.ms)}`);
-  if (covers) lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)}. Per book: ${seconds(covers.jobMs / covers.count)}, of which reading ${seconds(covers.readMs / covers.count)}, ${megabytes(covers.bytes / covers.count)} read`);
+  if (covers) lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)}. Per book: ${seconds(covers.jobMs / covers.count)}, of which reading ${seconds(covers.readMs / covers.count)}, ${megabytes(covers.bytes / covers.count)} read in ${Math.round((covers.reads || 0) / covers.count)} pieces, finding the file ${seconds((covers.fileMs || 0) / covers.count)}`);
   if (open) lines.push(`Last book opened in ${seconds(open.ms)}${open.picture ? ' (picture shown at once)' : ''}: file ${seconds(open.fileMs ?? 0)}, drawing ${seconds(open.ms - (open.fileMs ?? 0))}, of which reading ${seconds(open.readMs)}, ${megabytes(open.bytes)} read`);
   return lines.length ? `<h4>Timings</h4>${lines.map(l => `<p class="dim">${l}</p>`).join('')}` : '';
 }

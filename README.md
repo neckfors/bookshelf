@@ -13,8 +13,10 @@ The books stay on your device; nothing is uploaded.
 - 2 to 10 columns, set separately for portrait and landscape.
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed
   automatically (by size and date). You can also refresh all covers.
-- Only the front page is drawn for a cover, and only small pieces of the file are read to get it.
-- Books appear while the folder is still being read, and covers on screen are made first.
+- Covers are drawn with PDFium (the engine in Chrome's own PDF viewer), which goes straight to the
+  front page and reads only a few small parts of each file.
+- Books appear while the folder is still being read. Covers are made in the order you look at them:
+  the ones on screen from the top, then the ones below. Scroll further and the work moves with you.
   Settings shows how long finding books, making covers and opening a book took.
 
 ## Reading
@@ -34,7 +36,9 @@ Open the app in Chrome, install it from the browser menu, then tap **Choose fold
 folder with your PDFs (subfolders are included). If Chrome asks for access again later, tap **Allow**.
 
 The app must be served over HTTPS (or from `localhost`). The first start needs a network connection to
-fetch [pdf.js](https://mozilla.github.io/pdf.js/) from jsDelivr; it is then saved on the device.
+fetch [pdf.js](https://mozilla.github.io/pdf.js/) (for reading) and
+[PDFium](https://www.npmjs.com/package/@embedpdf/pdfium) (for covers, about 5 MB) from jsDelivr; they are then
+saved on the device.
 Settings and favorites are stored in the browser, so clearing the site's data removes them.
 
 ## Files
@@ -42,7 +46,7 @@ Settings and favorites are stored in the browser, so clearing the site's data re
 | --- | --- |
 | `js/app.js` | Browse view, folders, favorites, search |
 | `js/reader.js`, `js/gestures.js` | Reader and touch handling |
-| `js/library.js`, `js/covers.js` | Folder scanning and covers |
+| `js/library.js`, `js/covers.js`, `js/coverworker.js` | Folder scanning and covers |
 | `js/db.js`, `js/pdf.js`, `js/update.js`, `js/util.js` | Storage, PDF loading, updates, helpers |
 | `sw.js` | Offline use. Raise `VERSION` for each release |
 

@@ -31,3 +31,5 @@ export function closeSheet() {
   onSheetClose = null;
   done?.();
 }
+// Sorted by the file or folder name; the full path only decides ties.
+export const byName = (a, b) => natural(a.split('/').pop(), b.split('/').pop()) || natural(a, b);

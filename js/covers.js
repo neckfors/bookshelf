@@ -1,19 +1,42 @@
 // Builds one finished tile image per book (blurred background + whole cover), so browsing never opens a PDF.
-import { openPdf, makeCanvas, renderPage, inkBox, crop } from './pdf.js';
+import { makeCanvas, inkBox, crop } from './pdf.js';
 import { bookName } from './util.js';
 
 const W = 400, H = 600;
 
-export async function makeCover(file, path, options = {}, tools = {}) {
-  let pdf;
+// Each lane has its own worker, so several covers are drawn at once without freezing the page.
+export function coverWorker() {
+  let worker;
+  const stop = () => { worker?.terminate(); worker = null; };
+  // One page at a time: a second request waits for the first.
+  let last = Promise.resolve();
+  const run = (job, stats) => {
+    worker ??= new Worker(new URL('./coverworker.js', import.meta.url), { type: 'module' });
+    return new Promise((resolve, reject) => {
+      const failed = error => {
+        if (error.name === 'ReaderLoadError' || error.crashed) stop();
+        reject(Object.assign(new Error(error.message), { name: error.name }));
+      };
+      worker.onmessage = ({ data }) => {
+        if (stats && data.stats) { stats.bytes += data.stats.bytes; stats.readMs += data.stats.readMs; stats.reads += data.stats.reads; }
+        if (data.error) failed(data.error); else resolve(data.result);
+      };
+      worker.onerror = e => { e.preventDefault(); failed({ name: 'ReaderLoadError', message: e.message || 'The cover reader could not be started' }); };
+      worker.postMessage(job);
+    });
+  };
+  return { draw: (job, stats) => last = last.catch(() => {}).then(() => run(job, stats)) };
+}
+let spare;
+
+export async function makeCover(file, path, options = {}, { worker, stats } = {}) {
+  worker ??= spare ??= coverWorker();
   try {
-    pdf = await openPdf(file, tools);
-    const number = Math.min(Math.max(options.coverPage || 1, 1), pdf.numPages);
-    const page = await pdf.getPage(number);
-    const size = page.getViewport({ scale: 1 });
     const half = options.coverPart === 'left' || options.coverPart === 'right';
-    const scale = Math.min(W * (half ? 2 : 1) / size.width, H / size.height) * 1.15;
-    let art = await renderPage(page, scale);
+    const { pixels, width, height } = await worker.draw({ file, coverPage: options.coverPage,
+      maxWidth: W * (half ? 2 : 1) * 1.15, maxHeight: H * 1.15 }, stats);
+    let art = makeCanvas(width, height);
+    art.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
     if (half) art = crop(art, { x: options.coverPart === 'right' ? .5 : 0, y: 0, w: .5, h: 1 });
     const box = inkBox(art);
     if (!box) return await titleTile(path);
@@ -23,8 +46,6 @@ export async function makeCover(file, path, options = {}, tools = {}) {
   } catch (e) {
     if (['ReaderLoadError', 'NotFoundError', 'NotAllowedError', 'NotReadableError'].includes(e?.name)) throw e;
     return await titleTile(path);
-  } finally {
-    pdf?.destroy();
   }
 }
 
