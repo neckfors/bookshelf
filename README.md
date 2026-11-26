@@ -3,10 +3,13 @@
 An app for browsing and reading your own PDF books, made for a tablet.
 The books stay on your device; nothing is uploaded.
 
-It comes in two forms with the same screens and features:
-- **Android app** (recommended on Android, as it gets at the files faster):
-  [download the APK](https://github.com/neckfors/bookshelf/releases/latest). See [Android app](#android-app).
-- **Web app** to install from the browser: https://neckfors.github.io/bookshelf/
+### [⬇ Download the Android app](https://github.com/neckfors/bookshelf/releases/latest)
+
+For Android 8 or newer; see [how to install it](#android-app). It is recommended on Android, as it
+gets at the files faster.
+
+There is also a [web app](https://neckfors.github.io/bookshelf/) with the same screens and features,
+to install from the browser.
 
 ## Browsing
 - Front covers only, with nothing around them. Each takes an equally sized space and is shown whole, in
