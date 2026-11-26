@@ -1,5 +1,6 @@
 // Browse view: home, folders, favorites and search.
 import * as data from './library.js';
+import { showSpeedTest } from './speedtest.js';
 import * as db from './db.js';
 import { $, ICON, esc, bookName, parentOf, plural, byName, fold, openSheet, closeSheet } from './util.js';
 import { openBook, closeBook, isReading } from './reader.js';
@@ -125,7 +126,10 @@ function timingsHtml() {
   const { find, covers, open } = data.lib.timings;
   const lines = [];
   if (find) lines.push(`Last check: ${plural(find.files, 'book')} found in ${seconds(find.ms)}`);
-  if (covers) lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)}. Per book: ${seconds(covers.jobMs / covers.count)}, of which reading ${seconds(covers.readMs / covers.count)}, ${megabytes(covers.bytes / covers.count)} read in ${Math.round((covers.reads || 0) / covers.count)} pieces, finding the file ${seconds((covers.fileMs || 0) / covers.count)}, drawing ${seconds((covers.drawMs || 0) / covers.count)}. ${covers.direct || 0} scanned pictures taken directly, ${covers.lanes || 3} at a time`);
+  if (covers) {
+    const each = key => seconds((covers[key] || 0) / covers.count);
+    lines.push(`Last covers: ${covers.count} in ${seconds(covers.ms)} (${(covers.count / covers.ms * 1000).toFixed(1)} a second, ${covers.lanes || 3} at a time). Per book ${each('jobMs')}: finding the file ${each('fileMs')}, first read ${each('firstMs')}, waiting to draw ${each('waitMs')}, more reading ${each('readMs')}, picture ${each('drawMs')}, tile ${each('tileMs')}, saving ${each('saveMs')}. ${megabytes(covers.bytes / covers.count)} in ${((covers.reads || 0) / covers.count).toFixed(1)} reads per book, ${covers.direct || 0} scanned pictures taken directly`);
+  }
   if (open) lines.push(`Last book opened in ${seconds(open.ms)}${open.picture ? ' (picture shown at once)' : ''}: file ${seconds(open.fileMs ?? 0)}, drawing ${seconds(open.ms - (open.fileMs ?? 0))}, of which reading ${seconds(open.readMs)}, ${megabytes(open.bytes)} read`);
   return lines.length ? `<h4>Timings</h4>${lines.map(l => `<p class="dim">${l}</p>`).join('')}` : '';
 }
@@ -207,6 +211,7 @@ $('menuBtn').onclick = async () => {
     <h4>Library</h4>
     <button class="wide" data-act="rescan">Check for new and changed books</button>
     <button class="wide" data-act="covers">Refresh all covers</button>
+    <button class="wide" data-act="speed">Test file speed</button>
     <button class="wide" data-act="pick">${lib.root ? 'Change book folder' : 'Choose book folder'}</button>
     ${timingsHtml()}
     <p class="dim" id="version" style="margin-top:16px"></p>`);
@@ -225,6 +230,7 @@ $('menuBtn').onclick = async () => {
     hasAccess = await data.permission(true);
     render();
     if (!hasAccess) return;
+    if (el.dataset.act === 'speed') return showSpeedTest(await appVersion(), timingsHtml());
     if (el.dataset.act === 'covers') data.refreshAll(); else data.scan();
   };
   const version = await appVersion();

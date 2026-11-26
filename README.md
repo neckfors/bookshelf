@@ -15,11 +15,15 @@ The books stay on your device; nothing is uploaded.
   automatically (by size and date). You can also refresh all covers.
 - Covers are drawn with PDFium (the engine in Chrome's own PDF viewer), which goes straight to the
   front page and reads only a few small parts of each file. A scanned front page (one JPEG picture) is
-  handed to the browser's own, much faster picture decoder. Several covers are made at once.
+  handed to the browser's own, much faster picture decoder.
+- Getting data from a file is usually the slow part on Android, so 16 books are fetched at the same time.
+  The start and end of each file are read in advance, side by side, so one visit is normally enough.
+  Up to 4 background workers turn the data into finished tiles, without holding up scrolling.
 - Books are listed from their file names first, so they appear right away; checking for changed files
   happens afterwards. Covers are made in the order you look at them:
   the ones on screen from the top, then the ones below. Scroll further and the work moves with you.
-  Settings shows how long finding books, making covers and opening a book took.
+  Settings shows how long finding books, making covers and opening a book took, step by step.
+  **Test file speed** measures how fast the device hands over files and gives a report you can copy.
 
 ## Reading
 - Fullscreen, portrait and landscape. Swipe or tap the sides to turn; tap the middle for the menu.
@@ -48,7 +52,9 @@ Settings and favorites are stored in the browser, so clearing the site's data re
 | --- | --- |
 | `js/app.js` | Browse view, folders, favorites, search |
 | `js/reader.js`, `js/gestures.js` | Reader and touch handling |
-| `js/library.js`, `js/covers.js`, `js/coverworker.js` | Folder scanning and covers |
+| `js/library.js` | Folder scanning and the cover queue |
+| `js/covers.js`, `js/coverworker.js`, `js/scan.js`, `js/tile.js` | Making covers: fetching, drawing, scanned pictures, tiles |
+| `js/speedtest.js` | File speed test |
 | `js/db.js`, `js/pdf.js`, `js/update.js`, `js/util.js` | Storage, PDF loading, updates, helpers |
 | `sw.js` | Offline use. Raise `VERSION` for each release |
 

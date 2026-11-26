@@ -1,6 +1,6 @@
 // The collection: saved covers, per-book state, and checking the folder for changes.
 import * as db from './db.js';
-import { makeCover, coverWorker } from './covers.js';
+import { makeCover, warmDrawers, setDrawOrder } from './covers.js';
 import { warmUp } from './pdf.js';
 import { byName } from './util.js';
 
@@ -89,6 +89,8 @@ export function saveTiming(key, value) {
   return db.kvSet('timings', lib.timings);
 }
 export const newStats = () => ({ bytes: 0, readMs: 0, reads: 0, drawMs: 0, direct: 0 });
+// What is measured for each cover; the sums are shown in Settings.
+const coverStats = () => ({ ...newStats(), fileMs: 0, firstMs: 0, waitMs: 0, tileMs: 0, saveMs: 0 });
 
 // While books are being found, redraw now and then instead of for every file.
 let lastNotify = 0;
@@ -119,7 +121,7 @@ export function scan() {
 // Finding books and making covers run side by side, so covers appear while the folder is still being read.
 let run = null;
 function startRun() {
-  return run = { queue: new Set(), lanes: [], finding: true, found: 0, total: 0, done: 0, error: null, started: 0, ms: 0, jobMs: 0, fileMs: 0, ...newStats() };
+  return run = { queue: new Set(), lanes: [], finding: true, found: 0, total: 0, done: 0, error: null, started: 0, ms: 0, jobMs: 0, sums: coverStats() };
 }
 
 function showStatus() {
@@ -129,11 +131,14 @@ function showStatus() {
   lib.status = parts.join(' · ');
 }
 
-// Much of the time goes to waiting for the file, so several covers are worked on at once.
-const LANES = Math.min(6, Math.max(2, (navigator.hardwareConcurrency || 4) - 1));
+// Most of the time goes to waiting for files, and the waits can overlap, so many books are on the way at once.
+const LANES = 16;
 function addJobs(paths) {
   for (const path of paths) if (!run.queue.has(path)) { run.queue.add(path); run.total++; }
-  if (run.queue.size) run.started ||= performance.now();
+  if (run.queue.size) {
+    run.started ||= performance.now();
+    warmDrawers();
+  }
   let busy = run.lanes.filter(l => l.busy).length;
   while (busy < LANES && busy < run.queue.size) {
     const lane = { busy: true };
@@ -148,7 +153,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 // It is asked each time a cover is started, so after scrolling the work moves to where you stopped.
 let viewOrder = () => [];
 let scrolledAt = -1000;
-export const setViewOrder = fn => { viewOrder = fn; };
+export const setViewOrder = fn => { viewOrder = fn; setDrawOrder(fn); };
 export const scrolled = () => { scrolledAt = performance.now(); };
 function nextJob(queue) {
   for (const path of viewOrder()) if (queue.has(path)) return path;
@@ -157,12 +162,8 @@ function nextJob(queue) {
   for (const path of queue) if (first === undefined || byName(path, first) < 0) first = path;
   return first;
 }
-const workers = [];
-
 async function coverLane(current, lane) {
-  let worker;
   try {
-    worker = workers.pop() || coverWorker();
     while (current.queue.size && !current.error) {
       // An open book gets all the speed.
       if (lib.reading) { await sleep(500); continue; }
@@ -170,20 +171,15 @@ async function coverLane(current, lane) {
       if (performance.now() - scrolledAt < 150) { await sleep(60); continue; }
       const path = nextJob(current.queue);
       current.queue.delete(path);
-      const started = performance.now(), stats = newStats();
-      try { await refreshCover(path, { worker, stats }); }
+      const started = performance.now(), stats = coverStats();
+      try { await refreshCover(path, { stats }); }
       catch (e) {
         console.error(path, e);
         if (e?.name === 'ReaderLoadError') throw e;
       }
       current.done++;
       current.jobMs += performance.now() - started;
-      current.bytes += stats.bytes;
-      current.readMs += stats.readMs;
-      current.reads += stats.reads;
-      current.fileMs += stats.fileMs || 0;
-      current.drawMs += stats.drawMs;
-      current.direct += stats.direct;
+      for (const key in current.sums) current.sums[key] += stats[key];
       current.ms = performance.now() - current.started;
       if (run === current) {
         showStatus();
@@ -194,7 +190,6 @@ async function coverLane(current, lane) {
     current.error = e;
   } finally {
     lane.busy = false;
-    if (worker) workers.push(worker);
   }
 }
 
@@ -203,12 +198,17 @@ async function addFound(batch) {
   const added = [];
   for (const [path, handle] of batch) {
     handles.set(path, handle);
-    if (lib.books.has(path)) continue;
+    const old = lib.books.get(path);
+    if (old) {
+      if (old.stale) added.push(old);
+      continue;
+    }
     const book = { path, size: null, mtime: null, cover: null, stale: true };
     lib.books.set(path, book);
     added.push(book);
   }
-  if (added.length) await db.putMany('books', added);
+  const fresh = added.filter(b => b.size === null);
+  if (fresh.length) await db.putMany('books', fresh);
   return added.map(b => b.path);
 }
 
@@ -249,8 +249,6 @@ async function scanOnce() {
     notify();
   };
   try {
-    // Covers left over from last time can start right away.
-    addJobs([...lib.books.values()].filter(b => b.stale).map(b => b.path));
     for await (const entry of walk(root, '')) {
       if (lib.root !== root) { again = true; current.queue.clear(); return; }
       found.add(entry[0]);
@@ -277,8 +275,7 @@ async function scanOnce() {
   } finally {
     current.finding = false;
     await Promise.all(current.lanes.map(l => l.promise));
-    if (current.done) await saveTiming('covers', { count: current.done, ms: current.ms, jobMs: current.jobMs, bytes: current.bytes, readMs: current.readMs, reads: current.reads, fileMs: current.fileMs,
-      drawMs: current.drawMs, direct: current.direct, lanes: LANES });
+    if (current.done) await saveTiming('covers', { ...current.sums, count: current.done, ms: current.ms, jobMs: current.jobMs, lanes: LANES });
   }
   if (current.error) throw current.error;
 }
@@ -288,12 +285,15 @@ export async function refreshCover(path, tools = {}) {
   if (!book) return;
   const began = performance.now();
   const file = await fileFor(path);
-  if (tools.stats) tools.stats.fileMs = performance.now() - began;
+  if (tools.stats) tools.stats.fileMs += performance.now() - began;
   const cover = await makeCover(file, path, stateOf(path), tools);
   if (lib.books.get(path) !== book) return;
   Object.assign(book, { cover, stale: false, size: file.size, mtime: file.lastModified });
-  await db.put('books', book);
+  // Shown first: saving does not need to be waited for to see it.
   lib.onCover(path);
+  const drawn = performance.now();
+  await db.put('books', book);
+  if (tools.stats) tools.stats.saveMs += performance.now() - drawn;
 }
 
 export async function refreshAll() {

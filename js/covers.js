@@ -1,102 +1,79 @@
-// Builds one finished tile image per book (blurred background + whole cover), so browsing never opens a PDF.
-import { makeCanvas, inkBox, crop } from './pdf.js';
-import { bookName } from './util.js';
+// Makes covers in two stages. Waiting for the file is the slow part on Android, so many books are
+// fetched at the same time, while a few workers turn the fetched data into pictures.
+const WHOLE = 2 << 20, HEAD = 768 << 10, TAIL = 192 << 10;
+const DRAWERS = Math.min(4, Math.max(2, (navigator.hardwareConcurrency || 4) - 2));
 
-const W = 400, H = 600;
+// The start of a file usually holds the front page and the end holds the index, so both are fetched
+// right away, side by side. A small file is fetched whole. Every separate read costs a long wait.
+async function prefetch(file, stats) {
+  const started = performance.now();
+  const ranges = file.size <= WHOLE ? [[0, file.size]] : [[0, HEAD], [file.size - TAIL, file.size]];
+  const chunks = await Promise.all(ranges.map(async ([start, end]) =>
+    ({ start, data: new Uint8Array(await file.slice(start, end).arrayBuffer()) })));
+  if (stats) {
+    stats.firstMs += performance.now() - started;
+    for (const chunk of chunks) { stats.bytes += chunk.data.length; stats.reads++; }
+  }
+  return chunks;
+}
 
-// Each lane has its own worker, so several covers are drawn at once without freezing the page.
-export function coverWorker() {
+function newDrawer() {
   let worker;
   const stop = () => { worker?.terminate(); worker = null; };
-  // One page at a time: a second request waits for the first.
-  let last = Promise.resolve();
-  const run = (job, stats) => {
-    worker ??= new Worker(new URL('./coverworker.js', import.meta.url), { type: 'module' });
-    return new Promise((resolve, reject) => {
-      const failed = error => {
-        if (error.name === 'ReaderLoadError' || error.crashed) stop();
-        reject(Object.assign(new Error(error.message), { name: error.name }));
-      };
-      worker.onmessage = ({ data }) => {
-        if (stats && data.stats) for (const [key, value] of Object.entries(data.stats)) stats[key] = (stats[key] || 0) + value;
-        if (data.error) failed(data.error); else resolve(data.result);
-      };
-      worker.onerror = e => { e.preventDefault(); failed({ name: 'ReaderLoadError', message: e.message || 'The cover reader could not be started' }); };
-      worker.postMessage(job);
-    });
+  const start = () => worker ??= new Worker(new URL('./coverworker.js', import.meta.url), { type: 'module' });
+  return {
+    // Loads the PDF engine ahead of the first page.
+    warm() {
+      if (worker) return;
+      start().onerror = e => { e.preventDefault(); stop(); };
+      worker.postMessage({ warm: true });
+    },
+    run(job, stats) {
+      start();
+      return new Promise((resolve, reject) => {
+        const failed = error => {
+          if (error.name === 'ReaderLoadError' || error.crashed) stop();
+          reject(Object.assign(new Error(error.message), { name: error.name }));
+        };
+        worker.onmessage = ({ data }) => {
+          if (data.warmed) return;
+          if (stats && data.stats) for (const [key, value] of Object.entries(data.stats)) stats[key] = (stats[key] || 0) + value;
+          if (data.crashed) stop();
+          if (data.error) failed(data.error); else resolve(data.blob);
+        };
+        worker.onerror = e => { e.preventDefault(); failed({ name: 'ReaderLoadError', message: e.message || 'The cover reader could not be started' }); };
+        worker.postMessage(job, job.chunks.map(c => c.data.buffer));
+      });
+    },
   };
-  return { draw: (job, stats) => last = last.catch(() => {}).then(() => run(job, stats)) };
 }
-let spare;
 
-export async function makeCover(file, path, options = {}, { worker, stats } = {}) {
-  worker ??= spare ??= coverWorker();
+const free = Array.from({ length: DRAWERS }, newDrawer);
+const waiting = [];
+export const warmDrawers = () => free.forEach(d => d.warm());
+
+// When a worker gets free it takes the waiting book that is most wanted right now.
+let viewOrder = () => [];
+export const setDrawOrder = fn => { viewOrder = fn; };
+function release(drawer) {
+  if (!waiting.length) return free.push(drawer);
+  let best = 0;
+  if (waiting.length > 1) {
+    const rank = new Map(viewOrder().map((path, i) => [path, i]));
+    const of = entry => rank.get(entry.path) ?? Infinity;
+    for (let i = 1; i < waiting.length; i++) if (of(waiting[i]) < of(waiting[best])) best = i;
+  }
+  waiting.splice(best, 1)[0].take(drawer);
+}
+
+export async function makeCover(file, path, options = {}, { stats } = {}) {
+  const chunks = await prefetch(file, stats);
+  const asked = performance.now();
+  const drawer = free.pop() || await new Promise(take => waiting.push({ path, take }));
+  if (stats) stats.waitMs += performance.now() - asked;
   try {
-    const half = options.coverPart === 'left' || options.coverPart === 'right';
-    const { pixels, width, height } = await worker.draw({ file, coverPage: options.coverPage,
-      maxWidth: W * (half ? 2 : 1) * 1.15, maxHeight: H * 1.15 }, stats);
-    let art = makeCanvas(width, height);
-    art.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
-    if (half) art = crop(art, { x: options.coverPart === 'right' ? .5 : 0, y: 0, w: .5, h: 1 });
-    const box = inkBox(art);
-    if (!box) return await titleTile(path);
-    // Only trim real scan borders: a solid picture with a modest white margin around it.
-    if (box.solid && box.w > .5 && box.h > .5) art = crop(art, box);
-    return await tile(art);
-  } catch (e) {
-    if (['ReaderLoadError', 'NotFoundError', 'NotAllowedError', 'NotReadableError'].includes(e?.name)) throw e;
-    return await titleTile(path);
+    return await drawer.run({ file, path, chunks, coverPage: options.coverPage, coverPart: options.coverPart }, stats);
+  } finally {
+    release(drawer);
   }
-}
-
-function toBlob(canvas) {
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .86));
-}
-
-function tile(art) {
-  const out = makeCanvas(W, H), ctx = out.getContext('2d');
-  // Blur by shrinking to a few pixels and scaling up again (works in every browser).
-  const tiny = makeCanvas(16, 24);
-  const cover = Math.max(16 / art.width, 24 / art.height);
-  tiny.getContext('2d').drawImage(art, (16 - art.width * cover) / 2, (24 - art.height * cover) / 2, art.width * cover, art.height * cover);
-  const mid = makeCanvas(64, 96);
-  mid.getContext('2d').drawImage(tiny, 0, 0, 64, 96);
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(mid, -20, -30, W + 40, H + 60);
-  ctx.fillStyle = 'rgba(0,0,0,.45)';
-  ctx.fillRect(0, 0, W, H);
-  const fit = Math.min(W / art.width, H / art.height);
-  const w = art.width * fit, h = art.height * fit, x = (W - w) / 2, y = (H - h) / 2;
-  ctx.shadowColor = 'rgba(0,0,0,.7)';
-  ctx.shadowBlur = 18;
-  ctx.drawImage(art, x, y, w, h);
-  ctx.shadowColor = 'transparent';
-  const spine = ctx.createLinearGradient(x, 0, x + w * .09, 0);
-  spine.addColorStop(0, 'rgba(0,0,0,.35)');
-  spine.addColorStop(.45, 'rgba(255,255,255,.12)');
-  spine.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = spine;
-  ctx.fillRect(x, y, w * .09, h);
-  return toBlob(out);
-}
-
-function titleTile(path) {
-  const out = makeCanvas(W, H), ctx = out.getContext('2d');
-  let hue = 0;
-  for (const c of path) hue = (hue * 31 + c.charCodeAt(0)) % 360;
-  ctx.fillStyle = `hsl(${hue} 28% 25%)`;
-  ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = ctx.fillStyle = '#e8d6b0';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(24, 24, W - 48, H - 48);
-  ctx.font = '600 40px Georgia, serif';
-  ctx.textAlign = 'center';
-  const lines = [''];
-  for (const word of bookName(path).split(/[\s_]+/)) {
-    const last = lines[lines.length - 1], next = last ? `${last} ${word}` : word;
-    if (!last || ctx.measureText(next).width <= W - 90) lines[lines.length - 1] = next;
-    else lines.push(word);
-  }
-  lines.slice(0, 7).forEach((line, i) => ctx.fillText(line, W / 2, 160 + i * 52, W - 80));
-  return toBlob(out);
 }

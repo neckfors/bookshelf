@@ -53,11 +53,11 @@ export async function openPdf(file, { worker, stats } = {}) {
   return task.promise;
 }
 
+// Also used by the cover worker, where there is no page to put a canvas on.
 export function makeCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.round(w));
-  c.height = Math.max(1, Math.round(h));
-  return c;
+  const width = Math.max(1, Math.round(w)), height = Math.max(1, Math.round(h));
+  if (typeof document === 'undefined') return new OffscreenCanvas(width, height);
+  return Object.assign(document.createElement('canvas'), { width, height });
 }
 
 export async function renderPage(page, scale) {
