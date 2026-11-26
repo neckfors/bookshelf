@@ -3,6 +3,8 @@
 An installable web app for browsing and reading your own PDF books, made for a tablet.
 The books stay on your device; nothing is uploaded.
 
+**Open it:** https://neckfors.github.io/bookshelf/
+
 ## Browsing
 - Front covers only, in equal tiles. The whole cover is shown, with a blurred frame filling the gaps.
   White scan borders are trimmed. A book with a blank, locked or broken first page gets a title cover.
