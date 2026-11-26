@@ -77,6 +77,7 @@ Settings and favorites are stored in the browser, so clearing the site's data re
 | `js/native.js` | What differs in the Android app: folder access, front pages, full screen |
 | `js/db.js`, `js/pdf.js`, `js/update.js`, `js/util.js` | Storage, PDF loading, updates, helpers |
 | `sw.js` | Offline use. Raise `VERSION` for each release; the Android app takes its version from it |
+| `icons/` | The app icon (books on a shelf); the Android app's two icon layers are in `android/.../drawable-nodpi/` |
 | `android/` | The Android app. The web files are copied into it when it is built |
 | `release.ps1`, `version.json` | Publishing an Android release; `version.json` is made by the first one |
 

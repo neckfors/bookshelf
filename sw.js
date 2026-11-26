@@ -1,9 +1,9 @@
-const VERSION = '1.14';
+const VERSION = '1.15';
 const SHELL = `bookshelf-${VERSION}`;
 const LIBS = 'bookshelf-pdfjs-4.10.38';
 const CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/';
 const PDFIUM = 'https://cdn.jsdelivr.net/npm/@embedpdf/pdfium@2.15.1/dist/';
-const FILES = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
+const FILES = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png',
   'js/app.js', 'js/reader.js', 'js/gestures.js', 'js/library.js', 'js/covers.js', 'js/coverworker.js', 'js/scan.js', 'js/tile.js', 'js/speedtest.js', 'js/pdf.js', 'js/db.js', 'js/util.js', 'js/update.js', 'js/native.js'];
 
 self.addEventListener('install', event => {
