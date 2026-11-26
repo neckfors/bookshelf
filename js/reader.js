@@ -1,16 +1,61 @@
 // Fullscreen reader.
 import * as data from './library.js';
+import * as db from './db.js';
 import { openPdf, makeCanvas, renderPage, inkBox, crop } from './pdf.js';
 import { attachGestures } from './gestures.js';
 import { $, ICON, esc, bookName, openSheet, closeSheet } from './util.js';
 
 let book = null; // the open book
 let wake = null;
+let kept = null; // the last closed book stays open, so going back to it is instant
 const slots = [...document.querySelectorAll('.slot')];
 const stage = $('stage'), strip = $('strip');
 const portrait = matchMedia('(orientation: portrait)');
 
 export const isReading = () => !!book;
+
+// What the saved picture of a book must match to be shown while the book is opening.
+function previewKey(path, state) {
+  const file = data.lib.books.get(path);
+  return [file?.size, file?.mtime, state.page, state.layout, state.portraitSingle, state.rtl, state.trim, portrait.matches].join();
+}
+
+// A picture of the page that was showing is saved, to be shown at once next time.
+function savePreview() {
+  const canvas = slots[1].firstChild;
+  if (canvas?.tagName !== 'CANVAS' || !book.spreads[book.index]?.includes(book.state.page)) return;
+  const path = book.path, key = previewKey(path, book.state);
+  canvas.toBlob(blob => { if (blob) db.kvSet(`preview:${path}`, { key, blob }).catch(console.error); }, 'image/jpeg', .85);
+}
+
+// Fills the screen while the book is opened: the saved page, or else the cover when that is what comes first.
+async function showPreview(opening) {
+  const { path, state } = opening;
+  const saved = await db.kvGet(`preview:${path}`).catch(() => null);
+  let blob = saved?.key === previewKey(path, state) ? saved.blob : null;
+  const coverFirst = state.page === 1 && state.coverPage === 1 && state.coverPart === 'whole'
+    && (state.layout !== 'double' || (state.portraitSingle && portrait.matches));
+  if (!blob && coverFirst) blob = data.lib.books.get(path)?.cover;
+  // The real page may already be there.
+  if (!blob || book !== opening || slots[1].firstChild) return false;
+  const img = new Image();
+  img.className = 'preview';
+  img.alt = '';
+  img.onload = img.onerror = () => URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(blob);
+  slots[1].replaceChildren(img);
+  $('loading').hidden = true;
+  return true;
+}
+
+// Opens the file, unless it is the one that is still open from last time.
+async function load(path, stats) {
+  const file = await data.fileFor(path);
+  const same = kept && kept.path === path && kept.size === file.size && kept.mtime === file.lastModified;
+  const pdf = same ? kept.pdf : await openPdf(file, { stats });
+  if (same) kept = null;
+  return { pdf, source: { path, size: file.size, mtime: file.lastModified } };
+}
 
 function buildSpreads() {
   const { state, count } = book;
@@ -34,7 +79,7 @@ export async function openBook(path) {
   if (!await data.permission(true)) { leaveFullscreen(); return false; }
 
   const state = data.stateOf(path);
-  const opening = book = { path, state, spreads: [], index: 0, page: state.page, count: 0, cache: new Map(), zoom: 1, x: 0, y: 0 };
+  const opening = book = { path, state, spreads: [], index: 0, page: state.page, count: 0, cache: new Map(), sizes: new Set(), zoom: 1, x: 0, y: 0 };
   history.pushState({ reading: true }, '');
   root.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -45,12 +90,15 @@ export async function openBook(path) {
   $('rTitle').textContent = bookName(path);
   applyTone();
   keepAwake();
+  const preview = showPreview(opening);
   data.lib.reading = true;
   const began = performance.now(), stats = data.newStats();
   try {
-    const pdf = await openPdf(await data.fileFor(path), { stats });
+    const { pdf, source } = await load(path, stats);
     if (book !== opening) { pdf.destroy(); return true; }
+    const fileMs = performance.now() - began;
     book.pdf = pdf;
+    book.source = source;
     book.count = pdf.numPages;
     // The file may have been replaced by a shorter one.
     if (book.page > book.count) book.page = book.count;
@@ -59,11 +107,14 @@ export async function openBook(path) {
     await show();
     if (book === opening) {
       $('loading').hidden = true;
-      data.saveTiming('open', { ms: performance.now() - began, bytes: stats.bytes, readMs: stats.readMs });
+      data.saveTiming('open', { ms: performance.now() - began, fileMs, picture: await preview, bytes: stats.bytes, readMs: stats.readMs });
     }
   } catch (e) {
     console.error(e);
     if (book === opening) {
+      book.broken = true;
+      slots[1].replaceChildren();
+      $('loading').hidden = false;
       $('loading').textContent = e?.name === 'PasswordException' ? 'This book is password protected and cannot be opened.' : 'This book could not be opened.';
       showBars(true);
       $('bottomBar').hidden = true;
@@ -80,7 +131,11 @@ function leaveFullscreen() {
 export function closeBook() {
   if (!book) return;
   save();
-  book.pdf?.destroy();
+  savePreview();
+  if (book.pdf && !book.broken) {
+    kept?.pdf.destroy();
+    kept = { ...book.source, pdf: book.pdf };
+  } else book.pdf?.destroy();
   book = null;
   data.lib.reading = false;
   $('reader').hidden = true;
@@ -106,7 +161,8 @@ async function keepAwake() {
 
 // Draws the pages of one spread side by side into a canvas that fits the screen.
 async function drawSpread(index, quality) {
-  const { pdf, state, spreads } = book;
+  const current = book;
+  const { pdf, state, spreads } = current;
   const numbers = state.rtl ? [...spreads[index]].reverse() : spreads[index];
   const pages = await Promise.all(numbers.map(n => pdf.getPage(n)));
   const parts = [];
@@ -125,6 +181,7 @@ async function drawSpread(index, quality) {
     parts.push({ page, box, ratio: size.width * box.w / (size.height * box.h), height: size.height * box.h });
   }
   const vw = stage.clientWidth, vh = stage.clientHeight;
+  current.sizes.add(`${vw}x${vh}`);
   const totalRatio = parts.reduce((sum, p) => sum + p.ratio, 0);
   const cssH = Math.min(vh, vw / totalRatio), cssW = cssH * totalRatio;
   let density = (window.devicePixelRatio || 1) * quality;
@@ -132,9 +189,10 @@ async function drawSpread(index, quality) {
   const out = makeCanvas(cssW * density, cssH * density);
   const ctx = out.getContext('2d', { alpha: false });
   let x = 0;
-  for (const part of parts) {
-    let image = await renderPage(part.page, out.height / part.height);
-    if (state.trim) image = crop(image, part.box);
+  // The pages of a spread are drawn at the same time.
+  const images = await Promise.all(parts.map(part => renderPage(part.page, out.height / part.height)));
+  for (const [i, part] of parts.entries()) {
+    const image = state.trim ? crop(images[i], part.box) : images[i];
     const w = out.height * part.ratio;
     ctx.drawImage(image, x, 0, w + .5, out.height);
     x += w;
@@ -227,16 +285,24 @@ function jumpTo(page) {
 function redraw() {
   if (!book?.spreads.length) return;
   book.cache.clear();
+  book.sizes.clear();
   buildSpreads();
   slide(0, false);
   slots.forEach(s => s.replaceChildren());
   show();
 }
 let resizeTimer;
-new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 150); }).observe(stage);
+new ResizeObserver(() => {
+  clearTimeout(resizeTimer);
+  // Pages already drawn for this size are not drawn again.
+  resizeTimer = setTimeout(() => {
+    const size = `${stage.clientWidth}x${stage.clientHeight}`;
+    if (book && [...book.sizes].some(s => s !== size)) redraw();
+  }, 150);
+}).observe(stage);
 
 /* ---------- zoom ---------- */
-const canvasNow = () => slots[1].firstChild;
+const canvasNow = () => slots[1].querySelector('canvas');
 
 function applyZoom() {
   const canvas = canvasNow();

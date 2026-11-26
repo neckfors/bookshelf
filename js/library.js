@@ -1,7 +1,7 @@
 // The collection: saved covers, per-book state, and checking the folder for changes.
 import * as db from './db.js';
 import { makeCover } from './covers.js';
-import { newWorker } from './pdf.js';
+import { newWorker, warmUp } from './pdf.js';
 
 export const lib = {
   root: null,
@@ -23,6 +23,7 @@ export async function load() {
   books.forEach(b => lib.books.set(b.path, b));
   states.forEach(s => lib.states.set(s.path, s));
   lib.root = root || null;
+  if (lib.root) warmUp();
   lib.favFolders = favs || [];
 }
 
@@ -217,6 +218,7 @@ async function scanOnce() {
       lib.books.delete(path);
       current.queue.delete(path);
       await db.del('books', path);
+      await db.del('kv', `preview:${path}`);
     }
     await saveTiming('find', { files: found.size, ms: performance.now() - began });
     current.finding = false;

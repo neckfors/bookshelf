@@ -17,12 +17,15 @@ export async function newWorker() {
   return new pdfjs.PDFWorker();
 }
 let sharedWorker;
+const readerWorker = () => sharedWorker ??= newWorker().catch(e => { sharedWorker = null; throw e; });
+// Gets the reader ready before the first book is tapped. A failure shows up when a book is opened.
+export const warmUp = () => { readerWorker().catch(() => {}); };
 
 // Reads the file in slices, so a large book is not loaded into memory to show one page.
 // stats (optional) collects how much was read and how long the reading took.
 export async function openPdf(file, { worker, stats } = {}) {
   const pdfjs = await lib();
-  worker ??= await (sharedWorker ??= newWorker().catch(e => { sharedWorker = null; throw e; }));
+  worker ??= await readerWorker();
   let task;
   class FileRange extends pdfjs.PDFDataRangeTransport {
     requestDataRange(begin, end) {

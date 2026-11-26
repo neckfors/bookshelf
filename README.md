@@ -23,6 +23,8 @@ The books stay on your device; nothing is uploaded.
   single page in portrait; right to left; trim white margins; normal, sepia or dark pages;
   which page (and which half) is the cover.
 - Bookmarks, table of contents, page slider and "Go to page".
+- A picture of the page you left (or the cover) shows at once while the book opens, and the last
+  book you closed reopens instantly.
 - A book opens where you left it. If the last page was showing when you left, it starts from the beginning.
   Turning past the last page closes the book.
 
