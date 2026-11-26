@@ -19,7 +19,8 @@ to install from the browser.
 
 ## Browsing
 - Front covers only, with nothing around them. Each takes an equally sized space and is shown whole, in
-  its own shape, centred up and down. White scan borders are trimmed. A book with a blank, locked or broken first page gets
+  its own shape, centred up and down in its row. A row is only as tall as its tallest cover, so the space between
+  rows is always the same. White scan borders are trimmed. A book with a blank, locked or broken first page gets
   a title cover.
 - Folders with book counts, favorite folders and favorite books. A folder holds only the books directly
   in it. Every folder with books of its own is listed on the home screen, however deep it is, with the

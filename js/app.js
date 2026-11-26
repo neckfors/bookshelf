@@ -31,8 +31,23 @@ function tileInner(path) {
   return (book.cover ? `<img src="${coverUrl(book)}" alt="${esc(bookName(path))}" loading="lazy" decoding="async">` : '<span class="wait">…</span>') + badge;
 }
 
+// Each tile takes its cover's shape (never taller than 2:3), so a row is only as tall as its tallest
+// cover. The shapes are remembered, so rows have the right height before their pictures are loaded.
+let shapes = {}, shapeTimer = 0;
+try { shapes = JSON.parse(localStorage.getItem('shapes')) || {}; } catch { }
+const shapeStyle = path => shapes[path] ? ` style="--shape:${shapes[path]}"` : '';
+$('content').addEventListener('load', e => {
+  const img = e.target, tile = img.closest?.('.tile');
+  if (!tile || !img.naturalHeight) return;
+  const path = tile.dataset.book, shape = Math.round(Math.max(2 / 3, img.naturalWidth / img.naturalHeight) * 1000) / 1000;
+  tile.style.setProperty('--shape', shape);
+  if (shapes[path] === shape) return;
+  shapes[path] = shape;
+  shapeTimer ||= setTimeout(() => { shapeTimer = 0; try { localStorage.setItem('shapes', JSON.stringify(shapes)); } catch { } }, 1000);
+}, true);
+
 const grid = paths => `<div class="grid">${paths.map(p =>
-  `<button class="tile" data-book="${esc(p)}" aria-label="${esc(bookName(p))}">${tileInner(p)}</button>`).join('')}</div>`;
+  `<button class="tile" data-book="${esc(p)}"${shapeStyle(p)} aria-label="${esc(bookName(p))}">${tileInner(p)}</button>`).join('')}</div>`;
 
 // Folders are worked out from the book paths. A folder holds only the books directly in it, and
 // every folder with books of its own is listed on the home screen, however deep it is.

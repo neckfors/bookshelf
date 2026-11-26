@@ -1,4 +1,4 @@
-const VERSION = '1.13';
+const VERSION = '1.14';
 const SHELL = `bookshelf-${VERSION}`;
 const LIBS = 'bookshelf-pdfjs-4.10.38';
 const CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/';

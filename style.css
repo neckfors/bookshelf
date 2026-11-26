@@ -38,7 +38,7 @@ h2 small{font:13px system-ui,sans-serif;color:var(--dim)}
 .chip{border:1px solid #ffffff22;border-radius:18px;padding:8px 14px;font-size:13px}
 .chip.on{background:var(--text);color:#17120a}
 .grid{display:grid;grid-template-columns:repeat(var(--cols,5),minmax(0,1fr));gap:clamp(8px,1.6vw,18px)}
-.tile{aspect-ratio:2/3;position:relative;overflow:hidden;display:block;width:100%;padding:0;content-visibility:auto}
+.tile{aspect-ratio:var(--shape,2/3);align-self:center;position:relative;overflow:hidden;display:block;width:100%;padding:0;content-visibility:auto}
 .tile img{width:100%;height:100%;display:block;object-fit:contain}
 .tile .wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);background:var(--panel)}
 .tile .badge{position:absolute;right:5px;bottom:5px;color:var(--gold);filter:drop-shadow(0 1px 3px #000)}
