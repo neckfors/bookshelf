@@ -83,7 +83,7 @@ Android doesn't allow choosing the Download folder itself, only folders inside i
   and the app works offline.
 - Reading is full screen and keeps the screen on. **Back** closes an open sheet or book.
 - **Updates:** the app compares itself with `version.json` here on GitHub when you return to it and every
-  30 minutes, or when you tap **Check for updates** in Settings. When there is a new version, a bar with **Update** opens the download page. Install the
+  30 minutes, or when you tap **Check for updates** in Settings. When there is a new version, a bar appears above the library (not over an open book), and its **Update** button opens the download page. Install the
   new APK over the old one; your settings stay.
 - It asks for network access only (for pdf.js and the update check). It can only read the folder you choose.
 
