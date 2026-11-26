@@ -1,5 +1,5 @@
-// Makes covers in two stages. Waiting for the file is the slow part on Android, so many books are
-// fetched at the same time, while a few workers turn the fetched data into pictures.
+// Makes covers in two stages. Waiting for the file is the slow part on Android, so the next books are
+// fetched while a few workers turn already fetched data into pictures.
 const WHOLE = 2 << 20, HEAD = 768 << 10, TAIL = 192 << 10;
 const DRAWERS = Math.min(4, Math.max(2, (navigator.hardwareConcurrency || 4) - 2));
 

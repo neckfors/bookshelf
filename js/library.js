@@ -131,8 +131,9 @@ function showStatus() {
   lib.status = parts.join(' · ');
 }
 
-// Most of the time goes to waiting for files, and the waits can overlap, so many books are on the way at once.
-const LANES = 16;
+// Measured on an Android tablet: file reads are handled one after another, so more books at once are not
+// faster. A few keep the drawing busy; more would only delay the books you scroll to, or open.
+const LANES = 4;
 function addJobs(paths) {
   for (const path of paths) if (!run.queue.has(path)) { run.queue.add(path); run.total++; }
   if (run.queue.size) {

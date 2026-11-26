@@ -16,8 +16,10 @@ The books stay on your device; nothing is uploaded.
 - Covers are drawn with PDFium (the engine in Chrome's own PDF viewer), which goes straight to the
   front page and reads only a few small parts of each file. A scanned front page (one JPEG picture) is
   handed to the browser's own, much faster picture decoder.
-- Getting data from a file is usually the slow part on Android, so 16 books are fetched at the same time.
-  The start and end of each file are read in advance, side by side, so one visit is normally enough.
+- Getting data from a file is the slow part on Android, and reads are handled one after another there.
+  So the app makes as few reads as it can and only keeps 4 books on the way, which lets the work follow
+  your scrolling quickly.
+  The start and end of each file are read in advance, so often little more is needed.
   Up to 4 background workers turn the data into finished tiles, without holding up scrolling.
 - Books are listed from their file names first, so they appear right away; checking for changed files
   happens afterwards. Covers are made in the order you look at them:
