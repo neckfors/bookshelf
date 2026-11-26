@@ -40,7 +40,9 @@ export async function openPdf(file, { worker, stats } = {}) {
   task = pdfjs.getDocument({
     worker,
     range: new FileRange(file.size, null),
-    rangeChunkSize: 1 << 20,
+    // pdf.js looks up many small entries spread over the file, one per page in many books. With large
+    // pieces that adds up to reading the whole book just to show the front page.
+    rangeChunkSize: 1 << 15,
     disableAutoFetch: true,
     disableStream: true,
     cMapUrl: `${BASE}cmaps/`,
