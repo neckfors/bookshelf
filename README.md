@@ -61,3 +61,17 @@ Settings and favorites are stored in the browser, so clearing the site's data re
 | `sw.js` | Offline use. Raise `VERSION` for each release |
 
 To run it locally: `py -3 -m http.server 8123`, then open `http://localhost:8123`.
+
+## Android app (in progress)
+
+Chrome on a tablet reads files one at a time, so an Android app is being looked into. `android/` currently
+holds only a **speed test**: you choose the book folder, and it shows how long Android takes to find the
+books and draw their front pages. It reads the folder, changes nothing and sends nothing anywhere.
+
+Build it with Android Studio's Java:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'; .\android\gradlew.bat -p android assembleRelease
+```
+
+The APK ends up in `android/app/build/outputs/apk/release/`.
