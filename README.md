@@ -11,8 +11,9 @@ It comes in two forms with the same screens and features:
 ## Browsing
 - Front covers only, in equal tiles. The whole cover is shown, with a blurred frame filling the gaps.
   White scan borders are trimmed. A book with a blank, locked or broken first page gets a title cover.
-- Folders with book counts, favorite folders and favorite books. Only folders that hold books themselves
-  are listed, with the folders above them shown beside the count.
+- Folders with book counts, favorite folders and favorite books. A folder holds only the books directly
+  in it. Every folder with books of its own is listed on the home screen, however deep it is, with the
+  folders it lies in shown beside the count; folders without books of their own are not listed.
 - Search in file and folder names (accents don't matter), everywhere or in the open folder.
 - 2 to 10 columns, set separately for portrait and landscape (a phone starts with fewer than a tablet).
 - Covers are saved, so the library opens at once. New, changed and removed files are noticed

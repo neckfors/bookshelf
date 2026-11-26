@@ -34,39 +34,27 @@ function tileInner(path) {
 const grid = paths => `<div class="grid">${paths.map(p =>
   `<button class="tile" data-book="${esc(p)}" aria-label="${esc(bookName(p))}">${tileInner(p)}</button>`).join('')}</div>`;
 
-// Folders are worked out from the book paths. Counts include subfolders.
+// Folders are worked out from the book paths. A folder holds only the books directly in it, and
+// every folder with books of its own is listed on the home screen, however deep it is.
 function folderCounts() {
   const counts = new Map();
-  for (const path of lib.books.keys())
-    for (let dir = parentOf(path); dir; dir = parentOf(dir)) counts.set(dir, (counts.get(dir) || 0) + 1);
+  for (const path of lib.books.keys()) {
+    const dir = parentOf(path);
+    if (dir) counts.set(dir, (counts.get(dir) || 0) + 1);
+  }
   return counts;
-}
-
-// Only folders with books of their own are listed. One that just holds other folders is skipped,
-// and those folders are listed in its place.
-const foldersWithBooks = () => new Set([...lib.books.keys()].map(parentOf).filter(Boolean));
-function foldersIn(listed, parent) {
-  const prefix = parent ? `${parent}/` : '';
-  return [...listed].filter(path => {
-    if (!path.startsWith(prefix)) return false;
-    for (let up = parentOf(path); up !== parent; up = parentOf(up)) if (listed.has(up)) return false;
-    return true;
-  }).sort(byName);
 }
 
 const leaf = path => path.split('/').pop();
 const folderCard = (path, sub, star) => `<button class="folder" data-folder="${esc(path)}">${ICON.folder}${star ? '<em>★</em>' : ''}<b>${esc(leaf(path))}</b><span>${esc(sub)}</span></button>`;
-// The skipped folders between the one being looked at and a listed one, to tell equal names apart.
-function where(path, from) {
-  const between = parentOf(path).slice(from.length).replace(/^\//, '');
-  return between ? ` · ${between.replaceAll('/', ' › ')}` : '';
-}
+// The folders it lies in, to tell equal names apart.
+const where = path => parentOf(path) ? ` · ${parentOf(path).replaceAll('/', ' › ')}` : '';
 const section = (title, note = '') => `<h2>${title}<small>${note}</small></h2>`;
 const empty = (text, button = '') => `<div class="empty">${text}${button ? `<br>${button}` : ''}</div>`;
 
 function render() {
   const counts = folderCounts();
-  const listed = foldersWithBooks();
+  const listed = new Set(counts.keys());
   const all = [...lib.books.keys()].sort(byName);
   const inFolder = view.type === 'folder' && view.path !== '';
   const home = view.type === 'folder' && view.path === '';
@@ -77,11 +65,10 @@ function render() {
   $('favBtn').hidden = !inFolder;
   $('favBtn').classList.toggle('on', lib.favFolders.includes(view.path));
   $('title').textContent = home ? 'Bookshelf' : view.type === 'favorites' ? 'Favorite books' : leaf(view.path);
-  const inside = inFolder ? all.filter(p => p.startsWith(`${view.path}/`)) : [];
-  const direct = all.filter(p => parentOf(p) === (inFolder ? view.path : ''));
+  const direct = inFolder ? all.filter(p => parentOf(p) === view.path) : [];
   $('subtitle').textContent = lib.status || (home ? `${plural(all.length, 'book')} in ${plural(listed.size, 'folder')}`
     : view.type === 'favorites' ? plural(favBooks.length, 'book')
-      : `${plural(inside.length, 'book')}, including subfolders · ${direct.length} here`);
+      : plural(direct.length, 'book'));
   $('search').placeholder = inFolder ? `Search in ${leaf(view.path)} or everywhere` : 'Search books and folders';
   $('searchBox').hidden = !lib.root;
   $('clearSearch').hidden = !query;
@@ -95,12 +82,12 @@ function render() {
   } else if (query) {
     const words = fold(query).split(/\s+/).filter(Boolean);
     const match = name => words.every(w => fold(name).includes(w));
-    const scope = p => !(onlyHere && inFolder) || p.startsWith(`${view.path}/`);
-    const folders = [...listed].filter(p => scope(p) && match(leaf(p))).sort(byName);
-    shown = all.filter(p => scope(p) && match(bookName(p)));
+    const here = onlyHere && inFolder;
+    const folders = here ? [] : [...listed].filter(p => match(leaf(p))).sort(byName);
+    shown = (here ? direct : all).filter(p => match(bookName(p)));
     if (inFolder) html += `<div class="chips"><button class="chip ${onlyHere ? '' : 'on'}" data-act="everywhere">All folders</button><button class="chip ${onlyHere ? 'on' : ''}" data-act="here">Only ${esc(leaf(view.path))}</button></div>`;
     if (folders.length) html += section('Folders', folders.length) + `<div class="folders">${folders.map(p =>
-      folderCard(p, `${plural(counts.get(p), 'book')}${parentOf(p) ? ` · ${parentOf(p).replaceAll('/', ' › ')}` : ''}`)).join('')}</div>`;
+      folderCard(p, `${plural(counts.get(p), 'book')}${where(p)}`)).join('')}</div>`;
     if (shown.length) html += section('Books', shown.length) + grid(shown);
     if (!folders.length && !shown.length) html += empty('Nothing found.');
   } else if (view.type === 'favorites') {
@@ -113,9 +100,9 @@ function render() {
         (favBooks.length ? `<button class="folder" data-act="favorites">${ICON.star}<b>Favorite books</b><span>${plural(favBooks.length, 'book')}</span></button>` : '') +
         favs.map(p => folderCard(p, plural(counts.get(p), 'book'), true)).join('') + '</div>';
     }
-    const subs = foldersIn(listed, view.path);
+    const subs = home ? [...listed].sort((a, b) => byName(leaf(a), leaf(b)) || byName(a, b)) : [];
     if (subs.length) html += section('Folders') + `<div class="folders">${subs.map(p =>
-      folderCard(p, `${plural(counts.get(p), 'book')}${where(p, view.path)}`, lib.favFolders.includes(p))).join('')}</div>`;
+      folderCard(p, `${plural(counts.get(p), 'book')}${where(p)}`, lib.favFolders.includes(p))).join('')}</div>`;
     shown = home ? all : direct;
     if (shown.length) html += section(home ? 'All books' : 'Books', shown.length) + grid(shown);
     if (!html) html = empty(lib.status ? 'Looking for books…' : hasAccess ? 'No PDF files found here.' : 'No saved books yet.');
